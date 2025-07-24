@@ -8,7 +8,7 @@ import time
 import aiohttp
 import ssl
 import copy
-from PIL import Image
+from PIL import PILImage
 import asyncio
 import shutil
 from multiprocessing import Process
@@ -309,7 +309,7 @@ class MemeSender(Star):
                                 content = await resp.read()
 
                     try:
-                        with Image.open(io.BytesIO(content)) as img:
+                        with PILImage.open(io.BytesIO(content)) as img:
                             file_type = img.format.lower()
                     except Exception as e:
                         self.logger.error(f"图片格式检测失败: {str(e)}")

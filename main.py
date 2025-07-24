@@ -8,7 +8,7 @@ import time
 import aiohttp
 import ssl
 import copy
-from PIL import PILImage
+from PIL import Image as PILImage
 import asyncio
 import shutil
 from multiprocessing import Process

@@ -31,7 +31,7 @@ from .init import init_plugin
 
 
 @register(
-    "meme_manager", "anka", "anka - 表情包管理器 - 支持表情包发送及表情包上传", "3.14"
+    "meme_manager", "anka", "anka - 表情包管理器 - 支持表情包发送及表情包上传", "3.15"
 )
 class MemeSender(Star):
     def __init__(self, context: Context, config: dict = None):
@@ -422,6 +422,7 @@ class MemeSender(Star):
             bracket_pattern = r"\[([^\[\]]+)\]"
             matches = re.finditer(bracket_pattern, clean_text)
             bracket_replacements = []
+            invalid_brackets = []
 
             for match in matches:
                 original = match.group(0)
@@ -430,8 +431,12 @@ class MemeSender(Star):
                 if emotion in valid_emoticons:
                     bracket_replacements.append((original, emotion))
                 else:
-                    # 删除无效标记
-                    clean_text = clean_text.replace(original, "", 1)
+                    # 记录无效标记，稍后删除
+                    invalid_brackets.append(original)
+
+            # 删除所有无效标记
+            for invalid in invalid_brackets:
+                clean_text = clean_text.replace(invalid, "", 1)
 
             for original, emotion in bracket_replacements:
                 clean_text = clean_text.replace(original, "", 1)
@@ -441,6 +446,7 @@ class MemeSender(Star):
             paren_pattern = r"\(([^()]+)\)"
             matches = re.finditer(paren_pattern, clean_text)
             paren_replacements = []
+            invalid_parens = []
 
             for match in matches:
                 original = match.group(0)
@@ -452,6 +458,13 @@ class MemeSender(Star):
                         original, clean_text, match.start()
                     ):
                         paren_replacements.append((original, emotion))
+                else:
+                    # 记录无效标记，稍后删除
+                    invalid_parens.append(original)
+
+            # 删除所有无效标记
+            for invalid in invalid_parens:
+                clean_text = clean_text.replace(invalid, "", 1)
 
             for original, emotion in paren_replacements:
                 clean_text = clean_text.replace(original, "", 1)

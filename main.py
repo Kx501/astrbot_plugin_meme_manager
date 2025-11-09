@@ -31,7 +31,7 @@ from .init import init_plugin
 
 
 @register(
-    "meme_manager", "anka", "anka - 表情包管理器 - 支持表情包发送及表情包上传", "2.0"
+    "meme_manager", "anka", "anka - 表情包管理器 - 支持表情包发送及表情包上传", "3.14"
 )
 class MemeSender(Star):
     def __init__(self, context: Context, config: dict = None):
@@ -430,8 +430,8 @@ class MemeSender(Star):
                 if emotion in valid_emoticons:
                     bracket_replacements.append((original, emotion))
                 else:
-                    # 这里不删除无效标记，保留原样
-                    continue
+                    # 删除无效标记
+                    clean_text = clean_text.replace(original, "", 1)
 
             for original, emotion in bracket_replacements:
                 clean_text = clean_text.replace(original, "", 1)

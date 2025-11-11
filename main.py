@@ -31,7 +31,7 @@ from .init import init_plugin
 
 
 @register(
-    "meme_manager", "anka", "anka - 表情包管理器 - 支持表情包发送及表情包上传", "3.16"
+    "meme_manager", "anka", "anka - 表情包管理器 - 支持表情包发送及表情包上传", "3.18"
 )
 class MemeSender(Star):
     def __init__(self, context: Context, config: dict = None):
@@ -77,7 +77,8 @@ class MemeSender(Star):
                     local_dir=MEMES_DIR,
                     provider_type="cloudflare_r2"
                 )
-                self.logger.info(f"Cloudflare R2 图床已初始化: {r2_config.get('bucket_name')}")
+                # 延迟日志记录，避免 logger 未初始化
+                self._r2_bucket_name = r2_config.get("bucket_name")
 
         # 用于管理服务器
         self.webui_process = None
@@ -97,6 +98,11 @@ class MemeSender(Star):
 
         # 初始化 logger
         self.logger = logging.getLogger(__name__)
+        
+        # 记录 R2 初始化日志（如果已初始化）
+        if hasattr(self, '_r2_bucket_name'):
+            self.logger.info(f"Cloudflare R2 图床已初始化: {self._r2_bucket_name}")
+            delattr(self, '_r2_bucket_name')
 
         # 处理人格
         self.prompt_head = self.config.get("prompt").get("prompt_head")

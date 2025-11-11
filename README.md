@@ -162,15 +162,6 @@
 
 4. **配置插件**：在插件设置中选择 `cloudflare_r2` 并填写：
    ```yaml
-   # meme_manager 配置 (meme_manager)
-   meme_manager:
-     # 选择的图床 (image_host)
-     image_host: "cloudflare_r2"
-   
-     # 图床配置 (image_host_config)
-     image_host_config:
-       # Cloudflare R2 图床配置 (cloudflare_r2)
-       cloudflare_r2:
          # Cloudflare Account ID (account_id)
          account_id: "your_account_id"
          # R2 Access Key ID (access_key_id)
@@ -182,9 +173,6 @@
          # 自定义CDN域名 (可选) (public_url)
          # 例如: https://你的域名.com
          public_url: "https://你的域名.com"
-   
-     # Web UI 端口号 (webui_port)
-     webui_port: 5000
    ```
 
 5. **开启公共访问**（可选）：

@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Dict, List, Union
 from .core.sync_manager import SyncManager
-from .providers.stardots_provider import StarDotsProvider
+from .providers import StarDotsProvider, CloudflareR2Provider
 import multiprocessing
 import sys
 import asyncio
@@ -36,24 +36,34 @@ class ImageSync:
         sync.sync_all()
     """
 
-    def __init__(self, config: Dict[str, str], local_dir: Union[str, Path]):
+    def __init__(self, config: Dict[str, str], local_dir: Union[str, Path], provider_type: str = "stardots"):
         """
         初始化同步客户端
 
         Args:
-            config: 包含图床配置信息的字典，必须包含 key、secret 和 space
+            config: 包含图床配置信息的字典
             local_dir: 本地图片目录的路径
+            provider_type: 图床提供者类型，可选 "stardots" 或 "cloudflare_r2"
         """
         self.config = config
         self.local_dir = Path(local_dir)
-        self.provider = StarDotsProvider(
-            {
-                "key": config["key"],
-                "secret": config["secret"],
-                "space": config["space"],
-                "local_dir": str(local_dir),
-            }
-        )
+        self.provider_type = provider_type
+        
+        # 根据 provider_type 初始化对应的 provider
+        if provider_type == "stardots":
+            self.provider = StarDotsProvider(
+                {
+                    "key": config["key"],
+                    "secret": config["secret"],
+                    "space": config["space"],
+                    "local_dir": str(local_dir),
+                }
+            )
+        elif provider_type == "cloudflare_r2":
+            self.provider = CloudflareR2Provider(config)
+        else:
+            raise ValueError(f"不支持的图床提供者类型: {provider_type}")
+        
         self.sync_manager = SyncManager(
             image_host=self.provider, local_dir=self.local_dir
         )

@@ -31,7 +31,7 @@ from .init import init_plugin
 
 
 @register(
-    "meme_manager", "anka", "anka - 表情包管理器 - 支持表情包发送及表情包上传", "3.15"
+    "meme_manager", "anka", "anka - 表情包管理器 - 支持表情包发送及表情包上传", "3.16"
 )
 class MemeSender(Star):
     def __init__(self, context: Context, config: dict = None):
@@ -47,7 +47,9 @@ class MemeSender(Star):
 
         # 初始化图床同步客户端
         self.img_sync = None
-        if self.config.get("image_host") == "stardots":
+        image_host_type = self.config.get("image_host", "stardots")
+        
+        if image_host_type == "stardots":
             stardots_config = self.config.get("image_host_config", {}).get(
                 "stardots", {}
             )
@@ -59,6 +61,18 @@ class MemeSender(Star):
                         "space": stardots_config.get("space", "memes"),
                     },
                     local_dir=MEMES_DIR,
+                    provider_type="stardots"
+                )
+        elif image_host_type == "cloudflare_r2":
+            r2_config = self.config.get("image_host_config", {}).get(
+                "cloudflare_r2", {}
+            )
+            required_fields = ["account_id", "access_key_id", "secret_access_key", "bucket_name"]
+            if all(r2_config.get(field) for field in required_fields):
+                self.img_sync = ImageSync(
+                    config=r2_config,
+                    local_dir=MEMES_DIR,
+                    provider_type="cloudflare_r2"
                 )
 
         # 用于管理服务器

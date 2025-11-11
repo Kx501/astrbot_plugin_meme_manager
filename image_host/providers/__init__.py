@@ -2,7 +2,7 @@
 
 from .stardots_provider import StarDotsProvider
 from .cloudflare_r2_provider import CloudflareR2Provider
-from .provider_template import ImageHostProvider
+from .provider_template import ProviderTemplate as ImageHostProvider
 
 __all__ = [
     "StarDotsProvider",

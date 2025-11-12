@@ -112,6 +112,11 @@ class MemeSender(Star):
             "strict_max_emotions_per_message"
         )
 
+        # 内容清理规则
+        self.content_cleanup_rule = self.config.get(
+            "content_cleanup_rule", "&&[a-zA-Z]*&&"
+        )
+
         # 更新人格
         personas = self.context.provider_manager.personas
         self.persona_backup = copy.deepcopy(personas)
@@ -674,9 +679,9 @@ class MemeSender(Star):
             for component in chains:
                 if isinstance(component, Plain):
                     text = component.text
-                    # 使用正则表达式移除所有表情标签（包括标签名和&&符号）
-                    # 匹配模式：&&[a-zA-Z_]*&& - 匹配完整的表情标签格式
-                    text = re.sub(r"&&[a-zA-Z_]*&&", "", text)
+                    # 使用配置的正则表达式移除表情标签
+                    if self.content_cleanup_rule:
+                        text = re.sub(self.content_cleanup_rule, "", text)
                     if text.strip():
                         cleaned_chains.append(Plain(text))
 

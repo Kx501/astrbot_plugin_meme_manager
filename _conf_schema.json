@@ -153,5 +153,11 @@
       "sleep",
       "sigh"
     ]
+  },
+  "content_cleanup_rule": {
+    "description": "内容过滤正则表达式",
+    "type": "string",
+    "default": "&&[a-zA-Z]*&&",
+    "hint": "移除分段后内容中的指定内容。如填写 `[。？！]` 将移除所有的句号、问号、感叹号。"
   }
 }

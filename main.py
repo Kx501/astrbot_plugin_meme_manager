@@ -51,11 +51,14 @@ class MemeSender(Star):
                 "stardots", {}
             )
             if stardots_config.get("key") and stardots_config.get("secret"):
+                # 添加提供商信息到配置中
+                stardots_config["provider"] = "stardots"
                 self.img_sync = ImageSync(
                     config={
                         "key": stardots_config["key"],
                         "secret": stardots_config["secret"],
                         "space": stardots_config.get("space", "memes"),
+                        "provider": "stardots",
                     },
                     local_dir=MEMES_DIR,
                     provider_type="stardots",
@@ -74,6 +77,8 @@ class MemeSender(Star):
                 # 确保 public_url 不以斜杠结尾
                 if r2_config.get("public_url"):
                     r2_config["public_url"] = r2_config["public_url"].rstrip("/")
+                # 添加提供商信息到配置中
+                r2_config["provider"] = "cloudflare_r2"
                 self.img_sync = ImageSync(
                     config=r2_config, local_dir=MEMES_DIR, provider_type="cloudflare_r2"
                 )
@@ -116,6 +121,10 @@ class MemeSender(Star):
         self.content_cleanup_rule = self.config.get(
             "content_cleanup_rule", "&&[a-zA-Z]*&&"
         )
+
+        # 混合消息相关配置
+        self.enable_mixed_message = self.config.get("enable_mixed_message", True)
+        self.mixed_message_probability = self.config.get("mixed_message_probability", 80)
 
         # 更新人格
         personas = self.context.provider_manager.personas
@@ -201,7 +210,7 @@ class MemeSender(Star):
             )
             writer.close()
             return True
-        except:
+        except Exception:
             return False
 
     @filter.permission_type(filter.PermissionType.ADMIN)
@@ -654,7 +663,7 @@ class MemeSender(Star):
 
     @filter.on_decorating_result(priority=99999)
     async def on_decorating_result(self, event: AstrMessageEvent):
-        """在消息发送前处理文本部分"""
+        """在消息发送前处理文本部分，并准备混合消息"""
         if not self.found_emotions:
             return
 
@@ -663,45 +672,103 @@ class MemeSender(Star):
             return
 
         try:
-            chains = []
+            # 获取文本内容
+            text_chains = []
             original_chain = result.chain
 
             if original_chain:
                 if isinstance(original_chain, str):
-                    chains.append(Plain(original_chain))
+                    text_chains.append(original_chain)
                 elif isinstance(original_chain, MessageChain):
-                    chains.extend([c for c in original_chain if isinstance(c, Plain)])
+                    for component in original_chain:
+                        if isinstance(component, Plain):
+                            text_chains.append(component.text)
                 elif isinstance(original_chain, list):
-                    chains.extend([c for c in original_chain if isinstance(c, Plain)])
+                    for component in original_chain:
+                        if isinstance(component, Plain):
+                            text_chains.append(component.text)
 
             # 清理文本中的表情标签
-            cleaned_chains = []
-            for component in chains:
-                if isinstance(component, Plain):
-                    text = component.text
+            cleaned_text = ""
+            for text in text_chains:
+                if text:
                     # 使用配置的正则表达式移除表情标签
                     if self.content_cleanup_rule:
                         text = re.sub(self.content_cleanup_rule, "", text)
                     if text.strip():
-                        cleaned_chains.append(Plain(text))
+                        cleaned_text += text
 
-            text_result = event.make_result().set_result_content_type(
-                ResultContentType.LLM_RESULT
-            )
-            for component in cleaned_chains:
-                if isinstance(component, Plain):
-                    text_result = text_result.message(component.text)
+            # 准备表情图片
+            emotion_images = []
+            for emotion in self.found_emotions:
+                if not emotion:
+                    continue
 
-            if text_result.get_plain_text().strip():
-                event.set_result(text_result)
-            else:
-                await self.after_message_sent(event)
-                event.stop_event()
+                emotion_path = os.path.join(MEMES_DIR, emotion)
+                if not os.path.exists(emotion_path):
+                    continue
+
+                memes = [
+                    f
+                    for f in os.listdir(emotion_path)
+                    if f.endswith((".jpg", ".png", ".gif"))
+                ]
+                if not memes:
+                    continue
+
+                meme = random.choice(memes)
+                meme_file = os.path.join(emotion_path, meme)
+
+                # 根据概率决定是否发送
+                if random.randint(0, 100) <= self.emotions_probability:
+                    emotion_images.append(Image.fromFileSystem(meme_file))
+
+            # 决定是否使用混合消息
+            use_mixed_message = False
+            if self.enable_mixed_message and emotion_images:
+                use_mixed_message = random.randint(0, 100) <= self.mixed_message_probability
+
+            # 构建消息
+            if cleaned_text.strip() or emotion_images:
+                if use_mixed_message:
+                    # 混合消息：文本和图片在一条消息中
+                    mixed_components = []
+
+                    # 先添加文本
+                    if cleaned_text.strip():
+                        mixed_components.append(Plain(cleaned_text.strip()))
+
+                    # 再添加图片
+                    mixed_components.extend(emotion_images)
+
+                    # 创建 MessageChain
+                    message_chain = MessageChain(mixed_components)
+
+                    # 创建新的结果并设置消息链
+                    text_result = event.make_result().set_result_content_type(
+                        ResultContentType.LLM_RESULT
+                    )
+                    text_result.chain = message_chain
+                    event.set_result(text_result)
+
+                    # 清空已处理的表情
+                    self.found_emotions = []
+                else:
+                    # 分别发送：先发送文本，图片留给 after_message_sent 处理
+                    if cleaned_text.strip():
+                        text_result = event.make_result().set_result_content_type(
+                            ResultContentType.LLM_RESULT
+                        )
+                        text_result.chain = cleaned_text.strip()
+                        event.set_result(text_result)
+                    else:
+                        # 如果没有文本内容，直接发送图片
+                        await self.after_message_sent(event)
+                        event.stop_event()
 
         except Exception as e:
-            self.logger.error(f"处理文本失败: {str(e)}")
+            self.logger.error(f"处理混合消息失败: {str(e)}")
             import traceback
-
             self.logger.error(traceback.format_exc())
 
     @filter.after_message_sent()
@@ -730,16 +797,17 @@ class MemeSender(Star):
                 meme = random.choice(memes)
                 meme_file = os.path.join(emotion_path, meme)
 
-                if random.randint(0, 100) <= self.emotions_probability:
-                    if event.get_platform_name() == "gewechat":
-                        await event.send(
-                            MessageChain([Image.fromFileSystem(meme_file)])
-                        )
-                    else:
-                        await self.context.send_message(
-                            event.unified_msg_origin,
-                            MessageChain([Image.fromFileSystem(meme_file)]),
-                        )
+                # 检查概率（因为 on_decorating_result 中已经检查过一次，这里不需要再次检查）
+                # 直接发送剩余的表情图片
+                if event.get_platform_name() == "gewechat":
+                    await event.send(
+                        MessageChain([Image.fromFileSystem(meme_file)])
+                    )
+                else:
+                    await self.context.send_message(
+                        event.unified_msg_origin,
+                        MessageChain([Image.fromFileSystem(meme_file)]),
+                    )
             self.found_emotions = []
 
         except Exception as e:
@@ -760,29 +828,95 @@ class MemeSender(Star):
             return
 
         try:
+            # 获取图床配置信息
+            provider_name = self.img_sync.image_host.__class__.__name__
+            if hasattr(self.img_sync.image_host, 'bucket_name'):
+                storage_info = f"存储桶: {self.img_sync.image_host.bucket_name}"
+            elif hasattr(self.img_sync.image_host, 'album_id'):
+                storage_info = f"相册ID: {self.img_sync.image_host.album_id}"
+            else:
+                storage_info = "未知存储类型"
+
+            # 获取同步状态
             status = self.img_sync.check_status()
             to_upload = status.get("to_upload", [])
             to_download = status.get("to_download", [])
 
-            result = ["同步状态检查结果："]
+            # 统计信息
+            result = [
+                "📊 图床同步状态报告",
+                "",
+                f"🔧 图床服务: {provider_name}",
+                f"📁 {storage_info}",
+                "",
+                "📈 文件统计:",
+                f"  • 需要上传: {len(to_upload)} 个文件",
+                f"  • 需要下载: {len(to_download)} 个文件",
+                ""
+            ]
+
+            # 分类统计
+            upload_categories = {}
+            download_categories = {}
+
+            for file in to_upload:
+                cat = file.get('category', '未分类')
+                upload_categories[cat] = upload_categories.get(cat, 0) + 1
+
+            for file in to_download:
+                cat = file.get('category', '未分类')
+                download_categories[cat] = download_categories.get(cat, 0) + 1
+
+            # 显示上传分类统计
+            if upload_categories:
+                result.append("📤 待上传文件分类:")
+                for cat, count in sorted(upload_categories.items(), key=lambda x: x[1], reverse=True):
+                    result.append(f"  • {cat}: {count} 个")
+                result.append("")
+
+            # 显示下载分类统计
+            if download_categories:
+                result.append("📥 待下载文件分类:")
+                for cat, count in sorted(download_categories.items(), key=lambda x: x[1], reverse=True):
+                    result.append(f"  • {cat}: {count} 个")
+                result.append("")
+
+            # 显示文件详情（最多各显示5个）
             if to_upload:
-                result.append(f"\n需要上传的文件({len(to_upload)}个)：")
+                result.append("📤 待上传文件示例（前5个）:")
                 for file in to_upload[:5]:
-                    result.append(f"\n- {file['category']}/{file['filename']}")
+                    result.append(f"  • {file.get('category', '未分类')}/{file['filename']}")
                 if len(to_upload) > 5:
-                    result.append("\n...（还有更多文件）")
+                    result.append(f"  • ...还有 {len(to_upload) - 5} 个文件")
+                result.append("")
 
             if to_download:
-                result.append(f"\n需要下载的文件({len(to_download)}个):")
+                result.append("📥 待下载文件示例（前5个）:")
                 for file in to_download[:5]:
-                    result.append(f"\n- {file['category']}/{file['filename']}")
+                    result.append(f"  • {file.get('category', '未分类')}/{file['filename']}")
                 if len(to_download) > 5:
-                    result.append("\n...（还有更多文件）")
+                    result.append(f"  • ...还有 {len(to_download) - 5} 个文件")
+                result.append("")
 
+            # 同步状态总结
             if not to_upload and not to_download:
-                result.append("🌩️ 云端与本地图库已经完全同步啦！")
+                result.append("✅ 云端与本地图库已经完全同步啦！")
+            else:
+                result.append("⏳ 需要同步以保持云端与本地图库一致")
+                result.append("💡 使用 '/表情管理 同步到云端' 或 '/表情管理 从云端同步' 进行同步")
 
-            yield event.plain_result("".join(result))
+            # 上传记录统计（如果有的话）
+            if hasattr(self.img_sync.sync_manager, 'upload_tracker') and self.img_sync.sync_manager.upload_tracker:
+                try:
+                    # 获取上传记录总数
+                    if hasattr(self.img_sync.sync_manager.upload_tracker, 'get_uploaded_files'):
+                        uploaded_files = self.img_sync.sync_manager.upload_tracker.get_uploaded_files()
+                        result.append("")
+                        result.append(f"📝 上传记录: 已记录 {len(uploaded_files)} 个文件")
+                except Exception:
+                    pass  # 忽略获取上传记录时的错误
+
+            yield event.plain_result("\n".join(result))
         except Exception as e:
             self.logger.error(f"检查同步状态失败: {str(e)}")
             yield event.plain_result(f"检查同步状态失败: {str(e)}")
@@ -807,6 +941,114 @@ class MemeSender(Star):
         except Exception as e:
             self.logger.error(f"同步到云端失败: {str(e)}")
             yield event.plain_result(f"同步到云端失败: {str(e)}")
+
+    @meme_manager.command("图库统计")
+    async def show_library_stats(self, event: AstrMessageEvent):
+        """显示图库详细统计信息"""
+        try:
+            result = [
+                "📊 表情包图库统计报告",
+                "",
+                "📁 本地图库统计:"
+            ]
+
+            # 统计本地文件
+            local_stats = {}
+            local_total = 0
+
+            if os.path.exists(MEMES_DIR):
+                for category in os.listdir(MEMES_DIR):
+                    category_path = os.path.join(MEMES_DIR, category)
+                    if os.path.isdir(category_path):
+                        files = [f for f in os.listdir(category_path)
+                               if f.endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp'))]
+                        count = len(files)
+                        local_stats[category] = count
+                        local_total += count
+
+            # 显示本地统计
+            if local_stats:
+                result.append(f"  • 总文件数: {local_total} 个")
+                result.append(f"  • 分类数: {len(local_stats)} 个")
+                result.append("")
+                result.append("📂 本地分类详情:")
+                for cat, count in sorted(local_stats.items(), key=lambda x: x[1], reverse=True):
+                    result.append(f"  • {cat}: {count} 个")
+            else:
+                result.append("  • 本地图库为空")
+
+            # 云端统计（如果配置了图床）
+            if self.img_sync:
+                result.append("")
+                result.append("☁️ 云端图库统计:")
+
+                try:
+                    remote_images = self.img_sync.image_host.get_image_list()
+                    remote_stats = {}
+                    remote_total = len(remote_images)
+
+                    for img in remote_images:
+                        cat = img.get('category', '未分类')
+                        remote_stats[cat] = remote_stats.get(cat, 0) + 1
+
+                    result.append(f"  • 总文件数: {remote_total} 个")
+                    result.append(f"  • 分类数: {len(remote_stats)} 个")
+                    result.append("")
+                    result.append("📂 云端分类详情:")
+                    for cat, count in sorted(remote_stats.items(), key=lambda x: x[1], reverse=True):
+                        result.append(f"  • {cat}: {count} 个")
+
+                    # 对比统计
+                    result.append("")
+                    result.append("📈 本地与云端对比:")
+                    result.append(f"  • 本地文件: {local_total} 个")
+                    result.append(f"  • 云端文件: {remote_total} 个")
+
+                    if local_total > remote_total:
+                        result.append(f"  • 本地比云端多 {local_total - remote_total} 个文件")
+                    elif remote_total > local_total:
+                        result.append(f"  • 云端比本地多 {remote_total - local_total} 个文件")
+                    else:
+                        result.append("  • 本地与云端文件数相同")
+
+                    # 分类对比
+                    local_categories = set(local_stats.keys())
+                    remote_categories = set(remote_stats.keys())
+
+                    only_local = local_categories - remote_categories
+                    only_remote = remote_categories - local_categories
+                    common_categories = local_categories & remote_categories
+
+                    if only_local:
+                        result.append(f"  • 仅本地有的分类: {', '.join(sorted(only_local))}")
+                    if only_remote:
+                        result.append(f"  • 仅云端有的分类: {', '.join(sorted(only_remote))}")
+                    if common_categories:
+                        result.append(f"  • 共同分类: {len(common_categories)} 个")
+
+                except Exception as e:
+                    result.append(f"  • 获取云端统计失败: {str(e)}")
+            else:
+                result.append("")
+                result.append("☁️ 云端图库: 未配置")
+
+            # 存储空间估算
+            result.append("")
+            result.append("💾 存储空间估算:")
+            if local_total > 0:
+                # 假设平均每个文件 500KB
+                estimated_size = local_total * 500 / 1024  # 转换为MB
+                result.append(f"  • 本地图库约: {estimated_size:.1f} MB")
+
+            if self.img_sync and 'remote_total' in locals():
+                estimated_remote_size = remote_total * 500 / 1024
+                result.append(f"  • 云端图库约: {estimated_remote_size:.1f} MB")
+
+            yield event.plain_result("\n".join(result))
+
+        except Exception as e:
+            self.logger.error(f"获取图库统计失败: {str(e)}")
+            yield event.plain_result(f"获取图库统计失败: {str(e)}")
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @meme_manager.command("从云端同步")

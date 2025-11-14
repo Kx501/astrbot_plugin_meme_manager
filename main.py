@@ -657,23 +657,59 @@ class MemeSender(Star):
 
         return False
 
-    @filter.on_decorating_result(priority=1)
-    async def decorate_message(self, event: AstrMessageEvent):
-        """在消息发送前，将表情图片附加到消息链"""
+    @filter.on_decorating_result(priority=99999)
+    async def on_decorating_result(self, event: AstrMessageEvent):
+        """在消息发送前处理文本部分，并添加表情图片"""
         if not self.found_emotions:
             return
 
-        # 随机决定是否发送表情
-        if random.randint(1, 100) > self.emotions_probability:
-            self.found_emotions = []
+        result = event.get_result()
+        if not result:
             return
 
         try:
-            # 获取当前的消息链
-            chain = event.get_result().chain
+            # 获取文本内容并清理表情标签
+            text_chains = []
+            original_chain = result.chain
 
-            # 遍历之前找到的所有表情
+            if original_chain:
+                if isinstance(original_chain, str):
+                    text_chains.append(original_chain)
+                elif isinstance(original_chain, MessageChain):
+                    for component in original_chain:
+                        if isinstance(component, Plain):
+                            text_chains.append(component.text)
+                elif isinstance(original_chain, list):
+                    for component in original_chain:
+                        if isinstance(component, Plain):
+                            text_chains.append(component.text)
+
+            # 清理文本中的表情标签
+            cleaned_text = ""
+            for text in text_chains:
+                if text:
+                    # 使用配置的正则表达式移除表情标签
+                    if self.content_cleanup_rule:
+                        text = re.sub(self.content_cleanup_rule, "", text)
+                    if text.strip():
+                        cleaned_text += text
+
+            # 优先处理：如果有文本内容，先更新文本
+            if cleaned_text.strip():
+                text_result = event.make_result().set_result_content_type(
+                    ResultContentType.LLM_RESULT
+                )
+                text_result.chain = cleaned_text.strip()
+                event.set_result(text_result)
+
+            # 然后添加表情图片到更新后的消息链
+            final_chain = event.get_result().chain
+
+            # 添加表情图片（百分百概率发送）
             for emotion in self.found_emotions:
+                if not emotion:
+                    continue
+
                 emotion_path = os.path.join(MEMES_DIR, emotion)
                 if not os.path.exists(emotion_path):
                     continue
@@ -690,16 +726,25 @@ class MemeSender(Star):
                 meme_file = os.path.join(emotion_path, meme)
 
                 try:
-                    # 将图片添加到消息链的末尾
-                    chain.append(Image.fromFileSystem(meme_file))
+                    # 将图片添加到消息链
+                    if isinstance(final_chain, str):
+                        # 如果当前是字符串，转换为 MessageChain
+                        message_chain = MessageChain([Plain(final_chain), Image.fromFileSystem(meme_file)])
+                        event.get_result().chain = message_chain
+                    elif isinstance(final_chain, MessageChain):
+                        # 如果已经是 MessageChain，直接添加图片
+                        final_chain.append(Image.fromFileSystem(meme_file))
+                    elif isinstance(final_chain, list):
+                        # 如果是列表，添加图片
+                        final_chain.append(Image.fromFileSystem(meme_file))
                 except Exception as e:
                     self.logger.error(f"添加表情图片失败: {e}")
 
-            # 清空列表，避免重复发送
+            # 清空已处理的表情列表
             self.found_emotions = []
 
         except Exception as e:
-            self.logger.error(f"装饰消息链失败: {str(e)}")
+            self.logger.error(f"处理消息装饰失败: {str(e)}")
             import traceback
             self.logger.error(traceback.format_exc())
 

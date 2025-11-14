@@ -732,15 +732,15 @@ class MemeSender(Star):
 
             # 第三步：更新消息链
             if cleaned_components:
-                # 如果有清理后的内容，创建新的 MessageChain
-                result.chain = MessageChain(cleaned_components)
+                # 直接使用组件列表，不要包装在 MessageChain 中
+                result.chain = cleaned_components
             elif original_chain:
                 # 如果原本有内容但清理后为空，也要更新（避免发送带标签的空消息）
                 # 进行最后的防御性清理
                 if isinstance(original_chain, str):
                     final_cleaned = re.sub(r"&&+", "", original_chain)  # 清除残留的&&符号
                     if final_cleaned.strip():
-                        result.chain = MessageChain([Plain(final_cleaned.strip())])
+                        result.chain = [Plain(final_cleaned.strip())]
                 elif isinstance(original_chain, MessageChain):
                     # 对 MessageChain 中的每个 Plain 组件进行最后清理
                     final_components = []
@@ -752,7 +752,7 @@ class MemeSender(Star):
                         else:
                             final_components.append(component)
                     if final_components:
-                        result.chain = MessageChain(final_components)
+                        result.chain = final_components
 
         except Exception as e:
             self.logger.error(f"处理消息装饰失败: {str(e)}")

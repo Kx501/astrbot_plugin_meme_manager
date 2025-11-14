@@ -679,7 +679,7 @@ class MemeSender(Star):
 
                 elif isinstance(original_chain, MessageChain):
                     # MessageChain 类型：遍历清理 Plain 组件
-                    for component in original_chain:
+                    for component in original_chain.chain:
                         if isinstance(component, Plain):
                             cleaned = re.sub(self.content_cleanup_rule, "", component.text) if self.content_cleanup_rule else component.text
                             if cleaned.strip():
@@ -744,7 +744,7 @@ class MemeSender(Star):
                 elif isinstance(original_chain, MessageChain):
                     # 对 MessageChain 中的每个 Plain 组件进行最后清理
                     final_components = []
-                    for component in original_chain:
+                    for component in original_chain.chain:
                         if isinstance(component, Plain):
                             final_cleaned = re.sub(r"&&+", "", component.text)
                             if final_cleaned.strip():

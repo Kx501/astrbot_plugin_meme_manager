@@ -730,7 +730,19 @@ class MemeSender(Star):
 
                     # 将图片与文本组件智能配对，支持分段回复
                     if emotion_images:
+                        self.logger.info(f"找到 {len(emotion_images)} 个表情图片，开始与文本配对")
+                        self.logger.info(f"配对前的组件数量: {len(cleaned_components)}")
                         cleaned_components = self._merge_components_with_images(cleaned_components, emotion_images)
+                        self.logger.info(f"配对后的组件数量: {len(cleaned_components)}")
+                        # 打印配对后的组件类型
+                        for i, comp in enumerate(cleaned_components):
+                            comp_type = type(comp).__name__
+                            if isinstance(comp, Plain):
+                                self.logger.info(f"组件 {i}: {comp_type} - {comp.text[:20]}...")
+                            else:
+                                self.logger.info(f"组件 {i}: {comp_type}")
+                    else:
+                        self.logger.info("没有找到表情图片")
 
                 # 清空已处理的表情列表
                 self.found_emotions = []

@@ -5,24 +5,34 @@ from pathlib import Path
 # 获取当前插件目录的绝对路径
 PLUGIN_DIR = Path(__file__).parent.absolute()
 
-# 定义表情包文件夹路径 - 避免使用相对路径如 ../..
-# 直接使用绝对路径，或者相对于插件目录的路径
-MEMES_DIR = Path(os.path.join(PLUGIN_DIR, "..", "..", "memes_data", "memes")).resolve()
+# 获取 AstrBot 数据目录（从插件目录向上两级到 data 目录，然后进入 plugin_data）
+# 插件目录结构: data/plugins/astrbot_plugin_meme_manager
+# 插件数据目录应该是: data/plugin_data/meme_manager
+DATA_ROOT = PLUGIN_DIR.parent.parent  # data 目录
+PLUGIN_DATA_DIR = DATA_ROOT / "plugin_data" / "meme_manager"
+
+# 基础数据目录
+BASE_DATA_DIR = str(PLUGIN_DATA_DIR)
+
+# 表情包文件夹路径
+MEMES_DIR = PLUGIN_DATA_DIR / "memes"
 
 # 确保目录存在
-os.makedirs(MEMES_DIR, exist_ok=True)
+MEMES_DIR.mkdir(parents=True, exist_ok=True)
+
+# 类别描述数据文件路径
+MEMES_DATA_PATH = str(PLUGIN_DATA_DIR / "memes_data.json")
+
+# 临时文件目录
+TEMP_DIR = str(PLUGIN_DATA_DIR / "temp")
+
+# 获取当前文件所在目录（用于复制默认表情包）
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # 添加日志输出帮助调试
 print(f"插件目录: {PLUGIN_DIR}", file=sys.stderr)
+print(f"插件数据目录: {PLUGIN_DATA_DIR}", file=sys.stderr)
 print(f"表情包目录: {MEMES_DIR}", file=sys.stderr)
-
-# 获取当前文件所在目录
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# 基础路径配置
-BASE_DATA_DIR = os.path.join(CURRENT_DIR, "../../memes_data")
-MEMES_DATA_PATH = os.path.join(BASE_DATA_DIR, "memes_data.json")  # 类别描述数据文件路径
-TEMP_DIR = os.path.join(CURRENT_DIR, "../../temp")
 
 # 默认的类别描述
 DEFAULT_CATEGORY_DESCRIPTIONS = {

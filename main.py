@@ -702,7 +702,8 @@ class MemeSender(Star):
             if self.found_emotions:
                 # 检查概率（注意：概率判断是"小于等于"才发送）
                 if random.randint(1, 100) <= self.emotions_probability:
-                    # 为每个表情添加图片
+                    # 创建表情图片列表
+                    emotion_images = []
                     for emotion in self.found_emotions:
                         if not emotion:
                             continue
@@ -723,9 +724,13 @@ class MemeSender(Star):
                         meme_file = os.path.join(emotion_path, meme)
 
                         try:
-                            cleaned_components.append(Image.fromFileSystem(meme_file))
+                            emotion_images.append(Image.fromFileSystem(meme_file))
                         except Exception as e:
                             self.logger.error(f"添加表情图片失败: {e}")
+
+                    # 将图片与文本组件智能配对，支持分段回复
+                    if emotion_images:
+                        cleaned_components = self._merge_components_with_images(cleaned_components, emotion_images)
 
                 # 清空已处理的表情列表
                 self.found_emotions = []
@@ -1034,3 +1039,55 @@ class MemeSender(Star):
 
         await self._shutdown()
         await self._cleanup_resources()
+
+    def _merge_components_with_images(self, components, images):
+        """将表情图片与文本组件智能配对，支持分段回复
+
+        Args:
+            components: 清理后的消息组件列表
+            images: 表情图片列表
+
+        Returns:
+            合并后的消息组件列表，图片会合理地分布在文本中
+        """
+        if not images:
+            return components
+
+        if not components:
+            # 没有文本组件，只发送图片
+            return images
+
+        # 找到所有 Plain 组件的索引
+        plain_indices = [i for i, comp in enumerate(components) if isinstance(comp, Plain)]
+
+        if not plain_indices:
+            # 没有 Plain 组件，直接添加图片到末尾
+            return components + images
+
+        # 策略：将图片均匀分布在文本组件中，优先在文本后添加图片
+        # 这样在分段回复时，图片更容易和对应的文本一起发送
+        merged_components = components.copy()
+        images_per_text = max(1, len(images) // len(plain_indices))  # 每个文本至少配一张图片
+        image_index = 0
+
+        for idx, plain_idx in enumerate(plain_indices):
+            if image_index >= len(images):
+                break
+
+            # 计算这个文本应该配多少张图片
+            if idx == len(plain_indices) - 1:
+                # 最后一个文本组件，分配所有剩余图片
+                images_for_this_text = len(images) - image_index
+            else:
+                images_for_this_text = min(images_per_text, len(images) - image_index)
+
+            # 在这个文本组件后插入图片
+            insert_pos = plain_idx + 1 + idx * images_for_this_text  # 考虑之前插入的图片
+
+            for _ in range(images_for_this_text):
+                if image_index < len(images):
+                    merged_components.insert(insert_pos, images[image_index])
+                    image_index += 1
+                    insert_pos += 1
+
+        return merged_components

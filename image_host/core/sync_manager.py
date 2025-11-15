@@ -14,6 +14,40 @@ class SyncManager:
         self.file_handler = FileHandler(local_dir)
         self.upload_tracker = upload_tracker
 
+    def _normalize_remote_id(self, remote_id: str, provider_name: str = None) -> str:
+        """
+        根据不同的图床提供商规范化远程文件ID
+
+        Args:
+            remote_id: 远程文件ID
+            provider_name: 提供商名称
+
+        Returns:
+            规范化后的文件ID，用于与本地文件ID比较
+        """
+        if not provider_name:
+            # 尝试从配置获取提供商名称
+            if hasattr(self.image_host, 'config') and self.image_host.config:
+                provider_name = self.image_host.config.get('provider', '').lower()
+            elif hasattr(self.image_host, '__class__'):
+                provider_name = self.image_host.__class__.__name__.lower()
+
+        # 统一转换为正斜杠
+        normalized_id = remote_id.replace("\\", "/")
+
+        # 根据不同提供商处理特定的前缀
+        if provider_name:
+            if "cloudflare_r2" in provider_name or "r2" in provider_name:
+                # Cloudflare R2: 移除 memes/ 前缀
+                if normalized_id.startswith("memes/"):
+                    return normalized_id[6:]  # 移除"memes/"前缀
+            elif "stardots" in provider_name:
+                # Stardots: 保持原样（未来可能需要特殊处理）
+                pass
+            # 可以在这里添加其他提供商的处理逻辑
+
+        return normalized_id
+
     def check_sync_status(self) -> Dict[str, List[Dict]]:
         """检查同步状态 - 简化版，只检查存在性"""
         print("正在扫描本地文件...")
@@ -51,7 +85,11 @@ class SyncManager:
         to_download = []
         for img in remote_images:
             remote_id = img["id"].replace("\\", "/")
-            if remote_id not in local_file_ids:
+            # 使用规范化方法处理远程ID
+            normalized_remote_id = self._normalize_remote_id(remote_id)
+            if normalized_remote_id not in local_file_ids:
+                # 更新img的id为规范化后的ID，以便后续正确显示
+                img["id"] = normalized_remote_id
                 to_download.append(img)
         print(f"\n本地不存在的文件: {len(to_download)} 个")
 

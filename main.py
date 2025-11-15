@@ -1130,6 +1130,7 @@ class MemeSender(Star):
         merged_components = components.copy()
         images_per_text = max(1, len(images) // len(plain_indices))  # 每个文本至少配一张图片
         image_index = 0
+        images_inserted_so_far = 0  # 跟踪已插入的图片数量
 
         for idx, plain_idx in enumerate(plain_indices):
             if image_index >= len(images):
@@ -1143,12 +1144,15 @@ class MemeSender(Star):
                 images_for_this_text = min(images_per_text, len(images) - image_index)
 
             # 在这个文本组件后插入图片
-            insert_pos = plain_idx + 1 + idx * images_for_this_text  # 考虑之前插入的图片
+            # 注意：plain_idx 是在原始 components 中的位置，但由于我们已经插入了一些图片，
+            # 需要考虑已插入图片对当前位置的影响
+            insert_pos = plain_idx + 1 + images_inserted_so_far
 
             for _ in range(images_for_this_text):
                 if image_index < len(images):
                     merged_components.insert(insert_pos, images[image_index])
                     image_index += 1
                     insert_pos += 1
+                    images_inserted_so_far += 1
 
         return merged_components

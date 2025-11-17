@@ -5,13 +5,10 @@ from .file_storage import (
     add_emoji_to_category,
     delete_emoji_from_category,
 )
-import os
-import logging
+from astrbot.api import logger
 
 
 api = Blueprint("api", __name__)
-
-logger = logging.getLogger(__name__)
 
 
 @api.route("/emoji", methods=["GET"])
@@ -238,13 +235,18 @@ async def restore_category():
 
         plugin_config = current_app.config.get("PLUGIN_CONFIG", {})
         category_manager = plugin_config.get("category_manager")
+        memes_dir = plugin_config.get("memes_dir")
         
         if not category_manager:
             return jsonify({"message": "Category manager not found"}), 404
+        
+        if not memes_dir:
+            return jsonify({"message": "memes_dir not configured"}), 500
 
         # 创建类别目录
-        category_path = os.path.join(MEMES_DIR, category)
-        os.makedirs(category_path, exist_ok=True)
+        from pathlib import Path
+        category_path = Path(memes_dir) / category
+        category_path.mkdir(parents=True, exist_ok=True)
 
         # 更新类别描述
         if category_manager.update_description(category, description):

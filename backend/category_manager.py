@@ -1,11 +1,8 @@
-import os
-import logging
 from pathlib import Path
 from typing import Dict, Set, List, Tuple
 from ..constants import DEFAULT_CATEGORY_DESCRIPTIONS
 from ..utils import save_json, load_json
-
-logger = logging.getLogger(__name__)
+from astrbot.api import logger
 
 class CategoryManager:
     def __init__(self, memes_dir, memes_data_path):
@@ -34,8 +31,7 @@ class CategoryManager:
     def get_local_categories(self) -> Set[str]:
         """获取本地文件夹中的类别"""
         try:
-            return {d for d in os.listdir(self.memes_dir) 
-                   if (self.memes_dir / d).is_dir()}
+            return {item.name for item in self.memes_dir.iterdir() if item.is_dir()}
         except Exception as e:
             logger.error(f"获取本地类别失败: {e}")
             return set()

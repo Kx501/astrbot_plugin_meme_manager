@@ -10,9 +10,7 @@ from typing import List, Dict, TypedDict
 from ..interfaces.image_host import ImageHostInterface
 import urllib3
 import json
-import logging
-
-logger = logging.getLogger(__name__)
+from astrbot.api import logger
 
 
 class StarDotsError(Exception):

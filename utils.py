@@ -1,11 +1,9 @@
-import os
 import json
 import re
 import aiohttp
 import random
 import string
 from typing import Dict, Any
-import shutil
 from pathlib import Path
 from astrbot.api import logger
 

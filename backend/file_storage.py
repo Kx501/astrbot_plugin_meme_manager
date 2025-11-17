@@ -1,10 +1,8 @@
 import os
 import aiofiles  # 使用 aiofiles 进行异步文件操作
-import logging
 from werkzeug.utils import secure_filename
 from pathlib import Path
-
-logger = logging.getLogger(__name__)
+from astrbot.api import logger
 
 
 async def scan_emoji_folder(memes_dir):
@@ -13,17 +11,17 @@ async def scan_emoji_folder(memes_dir):
     memes_path = Path(memes_dir)
     if not memes_path.exists():
         memes_path.mkdir(parents=True, exist_ok=True)
-    for category in os.listdir(memes_path):
-        category_path = memes_path / category
+    for category_path in memes_path.iterdir():
         if category_path.is_dir():
+            category = category_path.name
             emoji_files = [
-                f
-                for f in os.listdir(category_path)
-                if f.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp"))
+                f.name
+                for f in category_path.iterdir()
+                if f.is_file() and f.suffix.lower() in (".png", ".jpg", ".jpeg", ".gif", ".webp")
             ]
             emoji_data[category] = emoji_files
         else:
-            emoji_data[category] = []
+            emoji_data[category_path.name] = []
     return emoji_data
 
 
@@ -33,9 +31,9 @@ def get_emoji_by_category(category, memes_dir):
     if not category_path.is_dir():
         return []
     emoji_files = [
-        f
-        for f in os.listdir(category_path)
-        if f.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".webp"))
+        f.name
+        for f in category_path.iterdir()
+        if f.is_file() and f.suffix.lower() in (".png", ".jpg", ".jpeg", ".gif", ".webp")
     ]
     return emoji_files
 

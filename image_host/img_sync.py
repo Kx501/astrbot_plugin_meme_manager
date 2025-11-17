@@ -6,9 +6,7 @@ from .providers import StarDotsProvider, CloudflareR2Provider
 import multiprocessing
 import sys
 import asyncio
-import logging
-
-logger = logging.getLogger(__name__)
+from astrbot.api import logger
 
 
 class ImageSync:

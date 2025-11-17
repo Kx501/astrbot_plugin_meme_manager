@@ -10,13 +10,11 @@ from typing import List, Dict, TypedDict
 from ..interfaces.image_host import ImageHostInterface
 import urllib3
 import json
-import logging
 import mimetypes
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from botocore.config import Config
-
-logger = logging.getLogger(__name__)
+from astrbot.api import logger
 
 
 class CloudflareR2Error(Exception):

@@ -1,9 +1,7 @@
 import json
 from pathlib import Path
 from typing import Dict, List, Set
-import logging
-
-logger = logging.getLogger(__name__)
+from astrbot.api import logger
 
 
 class UploadTracker:

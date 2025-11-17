@@ -11,7 +11,6 @@ from quart import (
     current_app
 )
 from .backend.api import api
-from .utils import generate_secret_key
 import asyncio
 import hypercorn.asyncio
 from hypercorn.config import Config

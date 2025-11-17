@@ -365,7 +365,7 @@ document.addEventListener("DOMContentLoaded", () => {
             document.getElementById("new-category-description").value = "";
             document.getElementById("add-category-form").style.display = "none";
             document.getElementById("add-category-btn").style.display = "block";
-            loadCategories(); // 重新加载类别列表
+            fetchEmojis(); // 重新加载类别列表
           } else {
             alert("添加类别失败：" + data.message);
           }
@@ -439,15 +439,15 @@ document.addEventListener("DOMContentLoaded", () => {
             <h4>新增类别（需要添加到配置）：</h4>
             <ul>
               ${differences.missing_in_config
-                .map(
-                  (category) => `
+            .map(
+              (category) => `
                 <li>
                   ${category}
                   <button onclick="syncConfig()" class="sync-btn">同步配置</button>
                 </li>
               `
-                )
-                .join("")}
+            )
+            .join("")}
             </ul>
           </div>
         `;
@@ -459,18 +459,17 @@ document.addEventListener("DOMContentLoaded", () => {
             <h4>已删除的类别（配置中仍存在）：</h4>
             <ul>
               ${differences.deleted_categories
-                .map(
-                  (category) => `
+            .map(
+              (category) => `
                 <li>
                   ${category}
                   <div class="action-buttons">
                     <button onclick="restoreCategory('${category}')" class="restore-btn">恢复类别</button>
-                    <button onclick="removeFromConfig('${category}')" class="remove-btn">从配置中删除</button>
                   </div>
                 </li>
               `
-                )
-                .join("")}
+            )
+            .join("")}
             </ul>
           </div>
         `;
@@ -502,97 +501,10 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  async function syncToRemote() {
-    try {
-      const btn = document.getElementById("upload-sync-btn");
-      btn.disabled = true;
-      btn.textContent = "同步中...";
-
-      const response = await fetch("/api/img_host/sync/upload", {
-        method: "POST",
-      });
-      if (!response.ok) throw new Error("同步到云端失败");
-
-      // 开始轮询检查进度
-      while (true) {
-        const statusResponse = await fetch("/api/img_host/sync/check_process");
-        if (!statusResponse.ok) throw new Error("检查同步状态失败");
-        const status = await statusResponse.json();
-
-        if (status.completed) {
-          if (status.success) {
-            alert("同步到云端完成！");
-            await checkSyncStatus(); // 刷新同步状态
-          } else {
-            throw new Error("同步失败");
-          }
-          break;
-        }
-
-        // 等待1秒后再次检查
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-      }
-    } catch (error) {
-      console.error("同步到云端失败:", error);
-      alert("同步到云端失败: " + error.message);
-    } finally {
-      const btn = document.getElementById("upload-sync-btn");
-      btn.disabled = false;
-      btn.textContent = "同步到云端";
-    }
-  }
-
-  async function syncFromRemote() {
-    try {
-      const btn = document.getElementById("download-sync-btn");
-      btn.disabled = true;
-      btn.textContent = "同步中...";
-
-      const response = await fetch("/api/img_host/sync/download", {
-        method: "POST",
-      });
-      if (!response.ok) throw new Error("从云端同步失败");
-
-      // 开始轮询检查进度
-      while (true) {
-        const statusResponse = await fetch("/api/img_host/sync/check_process");
-        if (!statusResponse.ok) throw new Error("检查同步状态失败");
-        const status = await statusResponse.json();
-
-        if (status.completed) {
-          if (status.success) {
-            alert("从云端同步完成！");
-            await checkSyncStatus(); // 刷新同步状态
-            await fetchEmojis(); // 刷新表情包列表
-          } else {
-            throw new Error("同步失败");
-          }
-          break;
-        }
-
-        // 等待1秒后再次检查
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-      }
-    } catch (error) {
-      console.error("从云端同步失败:", error);
-      alert("从云端同步失败: " + error.message);
-    } finally {
-      const btn = document.getElementById("download-sync-btn");
-      btn.disabled = false;
-      btn.textContent = "从云端同步";
-    }
-  }
-
-  // 同步按钮的事件监听器
+  // 配置同步按钮的事件监听器
   document
     .getElementById("check-sync-btn")
     .addEventListener("click", checkSyncStatus);
-  document
-    .getElementById("upload-sync-btn")
-    .addEventListener("click", syncToRemote);
-  document
-    .getElementById("download-sync-btn")
-    .addEventListener("click", syncFromRemote);
 
   // 初始检查一次同步状态
   checkSyncStatus();
@@ -635,31 +547,6 @@ document.addEventListener("DOMContentLoaded", () => {
     } catch (error) {
       console.error("恢复类别失败:", error);
       alert("恢复类别失败: " + error.message);
-    }
-  }
-
-  // 从配置中删除类别
-  async function removeFromConfig(category) {
-    if (!confirm(`确定要从配置中删除 "${category}" 类别吗？`)) {
-      return;
-    }
-
-    try {
-      const response = await fetch("/api/category/remove_from_config", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ category }),
-      });
-
-      if (!response.ok) throw new Error("从配置中删除类别失败");
-
-      // 重新加载数据
-      await checkSyncStatus();
-    } catch (error) {
-      console.error("从配置中删除类别失败:", error);
-      alert("从配置中删除类别失败: " + error.message);
     }
   }
 
@@ -720,7 +607,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // 这些函数是全局可访问的
   window.restoreCategory = restoreCategory;
-  window.removeFromConfig = removeFromConfig;
   window.syncConfig = syncConfig;
   window.editCategory = editCategory;
   window.cancelEdit = cancelEdit;
@@ -731,29 +617,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // 同步配置
   syncConfig();
-
-  // 加载类别数据并更新显示
-  async function loadCategories() {
-    try {
-      const response = await fetch("/api/emotions");
-      if (!response.ok) {
-        throw new Error("无法加载类别数据");
-      }
-      const data = await response.json();
-      if (typeof data !== "object" || Array.isArray(data)) {
-        throw new Error("返回的数据格式不正确");
-      }
-
-      updateSidebar(data, data);
-      displayCategories(data, data);
-    } catch (error) {
-      console.error("加载类别失败:", error);
-      alert("加载类别失败: " + error.message);
-    }
-  }
-
-  // 在 DOMContentLoaded 事件中调用 loadCategories
-  loadCategories(); // 页面加载时获取类别
 
   // 检查图床同步状态
   async function checkImgHostSyncStatus() {
@@ -776,7 +639,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // 同步到云端
+  // 图床同步：同步到云端
   async function syncImgHostToRemote() {
     try {
       const btn = document.getElementById("upload-sync-btn");
@@ -797,6 +660,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
         if (status.completed) {
           if (status.success) {
+            alert("同步到云端完成！");
+            await checkImgHostSyncStatus(); // 刷新图床同步状态
+            await fetchEmojis(); // 刷新表情包列表
           } else {
             throw new Error("同步失败");
           }
@@ -814,7 +680,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // 从云端同步
+  // 图床同步：从云端同步
   async function syncImgHostFromRemote() {
     try {
       const btn = document.getElementById("download-sync-btn");
@@ -835,6 +701,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
         if (status.completed) {
           if (status.success) {
+            alert("从云端同步完成！");
+            await checkImgHostSyncStatus(); // 刷新图床同步状态
+            await fetchEmojis(); // 刷新表情包列表
           } else {
             throw new Error("同步失败");
           }
@@ -852,10 +721,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // 绑定事件
-  document
-    .getElementById("check-sync-btn")
-    .addEventListener("click", checkImgHostSyncStatus);
+  // 图床同步按钮的事件监听器
   document
     .getElementById("upload-sync-btn")
     .addEventListener("click", syncImgHostToRemote);

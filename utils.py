@@ -25,7 +25,7 @@ def should_download_memes(memes_dir):
         return False
     
     # 目录为空，需要从 GitHub 下载
-    logger.info("表情包目录为空，将在后台从 GitHub 自动下载")
+    logger.info("表情包目录为空，将在后台自动下载")
     return True
 
 def save_json(data: Dict[str, Any], filepath: str) -> bool:
@@ -62,9 +62,11 @@ async def download_memes_from_github(plugin_data_dir):
     """从 GitHub Releases 下载默认表情包（zip 文件）
     
     压缩包标准：包含 memes 文件夹，直接解压到 plugin_data_dir 即可
+    支持使用 astrbot 配置的 HTTP 代理（通过环境变量）
     """
     import zipfile
     import io
+    import os
     
     # GitHub Releases 下载链接
     ZIP_URL = "https://github.com/Kx501/picx-images-hosting/releases/download/astrbot-memes/memes.zip"
@@ -72,12 +74,24 @@ async def download_memes_from_github(plugin_data_dir):
     plugin_data_path = Path(plugin_data_dir) if not isinstance(plugin_data_dir, Path) else plugin_data_dir
     
     try:
-        logger.info("开始从 GitHub 下载默认表情包...")
+        logger.info("开始下载默认表情包...")
         logger.info(f"下载地址: {ZIP_URL}")
+        
+        # 检查环境变量中的代理配置（astrbot 会设置这些环境变量）
+        # 优先使用 HTTPS_PROXY，如果没有则使用 HTTP_PROXY
+        proxy_url = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or \
+                   os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy")
+        
+        if proxy_url:
+            logger.info(f"使用代理: {proxy_url}")
         
         # 下载 zip 文件
         async with aiohttp.ClientSession() as session:
-            async with session.get(ZIP_URL, timeout=aiohttp.ClientTimeout(total=300)) as resp:
+            async with session.get(
+                ZIP_URL, 
+                proxy=proxy_url,  # 直接在请求中使用 proxy 参数
+                timeout=aiohttp.ClientTimeout(total=300)
+            ) as resp:
                 if resp.status != 200:
                     logger.error(f"下载失败，HTTP状态码: {resp.status}")
                     logger.error(f"URL: {ZIP_URL}")

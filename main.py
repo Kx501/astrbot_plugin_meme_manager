@@ -28,7 +28,7 @@ from .backend.category_manager import CategoryManager
 
 
 @register(
-    "meme_manager", "anka", "anka - 表情包管理器 - 支持表情包发送及表情包上传", "3.18"
+    "meme_manager_fork", "Kx501", "表情包管理器 - 支持表情包发送及表情包上传", "3.18"
 )
 class MemeSender(Star):
     def __init__(self, context: Context, config: dict = None):
@@ -134,7 +134,7 @@ class MemeSender(Star):
 
         # 检查是否需要从 GitHub 自动下载表情包
         if should_download_memes(self.memes_dir):
-            self.logger.info("已启动后台任务，从 GitHub 下载默认表情包")
+            self.logger.info("已启动后台任务...")
             # 使用 asyncio.create_task() 创建后台异步任务，不阻塞启动
             asyncio.create_task(self._auto_download_from_github())
 

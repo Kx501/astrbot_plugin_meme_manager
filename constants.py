@@ -1,10 +1,5 @@
 """插件常量定义 - 与 _conf_schema.json 区分开"""
 
-from pathlib import Path
-
-# 获取当前插件目录的绝对路径
-PLUGIN_DIR = Path(__file__).parent.absolute()
-
 # 默认的类别描述
 DEFAULT_CATEGORY_DESCRIPTIONS = {
     "angry": "当对话包含抱怨、批评或激烈反对时使用（如用户投诉/观点反驳）",

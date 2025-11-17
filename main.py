@@ -19,12 +19,12 @@ from astrbot.core.message.components import Plain
 from astrbot.api.all import *
 from astrbot.api import logger
 from astrbot.core.message.message_event_result import MessageChain
+from pathlib import Path
 from .webui import run_server, ServerState
-from .utils import get_public_ip, generate_secret_key, dict_to_string, load_json, download_memes_from_github
+from .utils import get_public_ip, generate_secret_key, dict_to_string, load_json, download_memes_from_github, should_download_memes, save_json
 from .image_host.img_sync import ImageSync
-from .config import MEMES_DIR, MEMES_DATA_PATH, DEFAULT_CATEGORY_DESCRIPTIONS
+from .constants import DEFAULT_CATEGORY_DESCRIPTIONS
 from .backend.category_manager import CategoryManager
-from .init import init_plugin
 
 
 @register(
@@ -35,12 +35,22 @@ class MemeSender(Star):
         super().__init__(context)
         self.config = config or {}
 
+        # 使用官方接口获取插件数据目录
+        from astrbot.api.star import StarTools
+        plugin_data_dir = StarTools.get_data_dir(None)  # 自动检测插件名称
+
+        # 初始化路径
+        self._init_paths(plugin_data_dir)
+
         # 初始化插件
-        if not init_plugin():
+        if not self._initialize_plugin():
             raise RuntimeError("插件初始化失败")
 
         # 初始化类别管理器
-        self.category_manager = CategoryManager()
+        self.category_manager = CategoryManager(
+            memes_dir=self.memes_dir,
+            memes_data_path=self.memes_data_path
+        )
 
         # 初始化图床同步客户端
         self.img_sync = None
@@ -57,7 +67,7 @@ class MemeSender(Star):
                         "secret": stardots_config["secret"],
                         "space": stardots_config.get("space", "memes"),
                     },
-                    local_dir=MEMES_DIR,
+                    local_dir=self.memes_dir,
                     provider_type="stardots",
                 )
         elif image_host_type == "cloudflare_r2":
@@ -75,7 +85,7 @@ class MemeSender(Star):
                 if r2_config.get("public_url"):
                     r2_config["public_url"] = r2_config["public_url"].rstrip("/")
                 self.img_sync = ImageSync(
-                    config=r2_config, local_dir=MEMES_DIR, provider_type="cloudflare_r2"
+                    config=r2_config, local_dir=self.memes_dir, provider_type="cloudflare_r2"
                 )
                 # 延迟日志记录，避免 logger 未初始化
                 self._r2_bucket_name = r2_config.get("bucket_name")
@@ -123,11 +133,34 @@ class MemeSender(Star):
         self._reload_personas()
 
         # 检查是否需要从 GitHub 自动下载表情包
-        from .utils import copy_memes_if_not_exists
-        if copy_memes_if_not_exists():
+        if should_download_memes(self.memes_dir):
             self.logger.info("已启动后台任务，从 GitHub 下载默认表情包")
             # 使用 asyncio.create_task() 创建后台异步任务，不阻塞启动
             asyncio.create_task(self._auto_download_from_github())
+
+    def _init_paths(self, plugin_data_dir):
+        """初始化所有路径配置"""
+        self.plugin_data_dir = Path(plugin_data_dir)
+        self.memes_dir = self.plugin_data_dir / "memes"
+        self.memes_data_path = self.plugin_data_dir / "memes_data.json"
+        self.temp_dir = self.plugin_data_dir / "temp"
+        
+        # 确保目录存在
+        self.memes_dir.mkdir(parents=True, exist_ok=True)
+        self.temp_dir.mkdir(parents=True, exist_ok=True)
+
+    def _initialize_plugin(self):
+        """初始化插件，创建必要的目录和配置文件"""
+        try:
+            # 初始化 memes_data.json
+            if not self.memes_data_path.exists():
+                save_json(DEFAULT_CATEGORY_DESCRIPTIONS, str(self.memes_data_path))
+                logger.info(f"创建默认类别描述文件: {self.memes_data_path}")
+            
+            return True
+        except Exception as e:
+            logger.error(f"插件初始化失败: {e}")
+            return False
 
     @filter.command_group("表情管理")
     def meme_manager(self):
@@ -167,6 +200,7 @@ class MemeSender(Star):
                 "category_manager": self.category_manager,
                 "webui_port": self.server_port,
                 "server_key": self.server_key,
+                "memes_dir": str(self.memes_dir),
             }
             self.webui_process = Process(target=run_server, args=(config_for_server,))
             self.webui_process.start()
@@ -245,7 +279,7 @@ class MemeSender(Star):
     def _reload_personas(self):
         """重新注入人格"""
         self.category_mapping = load_json(
-            MEMES_DATA_PATH, DEFAULT_CATEGORY_DESCRIPTIONS
+            str(self.memes_data_path), DEFAULT_CATEGORY_DESCRIPTIONS
         )
         self.category_mapping_string = dict_to_string(self.category_mapping)
         self.sys_prompt_add = (
@@ -311,7 +345,7 @@ class MemeSender(Star):
             return
 
         category = upload_state["category"]
-        save_dir = os.path.join(MEMES_DIR, category)
+        save_dir = os.path.join(self.memes_dir, category)
 
         try:
             os.makedirs(save_dir, exist_ok=True)
@@ -373,7 +407,7 @@ class MemeSender(Star):
             # 基础成功消息
             result_msg = [
                 Plain(
-                    f"✅ 已经成功收录了 {len(saved_files)} 张新表情到「{category}」图库！"
+                    f"已经成功收录了 {len(saved_files)} 张新表情到「{category}」图库！"
                 )
             ]
 
@@ -402,15 +436,15 @@ class MemeSender(Star):
         """从 GitHub 自动下载表情包（后台异步任务）"""
         try:
             self.logger.info("=" * 60)
-            self.logger.info("开始从 GitHub 下载默认表情包...")
+            self.logger.info("准备从 GitHub 下载默认表情包")
             self.logger.info("这可能需要一些时间，插件功能可正常使用")
             self.logger.info("=" * 60)
             
-            success = await download_memes_from_github()
+            success = await download_memes_from_github(self.plugin_data_dir)
             
             if success:
                 self.logger.info("=" * 60)
-                self.logger.info("✅ 默认表情包下载完成！")
+                self.logger.info("默认表情包下载完成！")
                 self.logger.info("=" * 60)
                 # 重新加载表情配置
                 await self.reload_emotions()
@@ -423,13 +457,13 @@ class MemeSender(Star):
 
     def _check_meme_directories(self):
         """检查表情包目录是否存在并且包含图片"""
-        self.logger.info(f"开始检查表情包根目录: {MEMES_DIR}")
-        if not os.path.exists(MEMES_DIR):
-            self.logger.error(f"表情包根目录不存在，请检查: {MEMES_DIR}")
+        self.logger.info(f"开始检查表情包根目录: {self.memes_dir}")
+        if not os.path.exists(self.memes_dir):
+            self.logger.error(f"表情包根目录不存在，请检查: {self.memes_dir}")
             return
 
         for emotion in self.category_manager.get_descriptions().values():
-            emotion_path = os.path.join(MEMES_DIR, emotion)
+            emotion_path = os.path.join(self.memes_dir, emotion)
             if not os.path.exists(emotion_path):
                 self.logger.error(
                     f"表情分类 {emotion} 对应的目录不存在，请查看: {emotion_path}"
@@ -745,7 +779,7 @@ class MemeSender(Star):
                 if not emotion:
                     continue
 
-                emotion_path = os.path.join(MEMES_DIR, emotion)
+                emotion_path = os.path.join(self.memes_dir, emotion)
                 if not os.path.exists(emotion_path):
                     continue
 

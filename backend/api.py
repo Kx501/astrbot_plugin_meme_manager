@@ -1,12 +1,11 @@
 from quart import Blueprint, jsonify, request, current_app
-from .models import (
+from .file_storage import (
     scan_emoji_folder,
     get_emoji_by_category,
     add_emoji_to_category,
     delete_emoji_from_category,
 )
 import os
-from ..config import MEMES_DIR
 import logging
 
 
@@ -18,7 +17,11 @@ logger = logging.getLogger(__name__)
 @api.route("/emoji", methods=["GET"])
 async def get_all_emojis():
     """获取所有表情包（按类别分组）"""
-    emoji_data = await scan_emoji_folder()
+    plugin_config = current_app.config.get("PLUGIN_CONFIG", {})
+    memes_dir = plugin_config.get("memes_dir")
+    if not memes_dir:
+        return jsonify({"error": "memes_dir not configured"}), 500
+    emoji_data = await scan_emoji_folder(memes_dir)
     for category in emoji_data:
         if not isinstance(emoji_data[category], list):
             emoji_data[category] = []
@@ -28,7 +31,11 @@ async def get_all_emojis():
 @api.route("/emoji/<category>", methods=["GET"])
 async def get_emojis_by_category(category):
     """获取指定类别的表情包"""
-    emojis = get_emoji_by_category(category)
+    plugin_config = current_app.config.get("PLUGIN_CONFIG", {})
+    memes_dir = plugin_config.get("memes_dir")
+    if not memes_dir:
+        return jsonify({"error": "memes_dir not configured"}), 500
+    emojis = get_emoji_by_category(category, memes_dir)
     if emojis is None:
         return jsonify({"message": "Category not found"}), 404
     return jsonify(emojis if isinstance(emojis, list) else []), 200
@@ -59,10 +66,13 @@ async def add_emoji():
         logger.info(f"收到上传请求: 类别={category}, 文件名={image_file.filename}")
         
         try:
-            result_path = add_emoji_to_category(category, image_file)
+            plugin_config = current_app.config.get("PLUGIN_CONFIG", {})
+            memes_dir = plugin_config.get("memes_dir")
+            if not memes_dir:
+                return jsonify({"message": "memes_dir not configured"}), 500
+            result_path = add_emoji_to_category(category, image_file, memes_dir)
             
             # 添加成功后同步配置
-            plugin_config = current_app.config.get("PLUGIN_CONFIG", {})
             category_manager = plugin_config.get("category_manager")
             if category_manager:
                 category_manager.sync_with_filesystem()
@@ -93,7 +103,12 @@ async def delete_emoji():
     if not category or not image_file:
         return jsonify({"message": "Category and image file are required"}), 400
 
-    if delete_emoji_from_category(category, image_file):
+    plugin_config = current_app.config.get("PLUGIN_CONFIG", {})
+    memes_dir = plugin_config.get("memes_dir")
+    if not memes_dir:
+        return jsonify({"message": "memes_dir not configured"}), 500
+
+    if delete_emoji_from_category(category, image_file, memes_dir):
         return jsonify({"message": "Emoji deleted successfully", "category": category, "filename": image_file}), 200
     else:
         return jsonify({"message": "Emoji not found"}), 404

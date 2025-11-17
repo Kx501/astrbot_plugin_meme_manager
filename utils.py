@@ -6,27 +6,14 @@ import random
 import string
 from typing import Dict, Any
 import shutil
+from pathlib import Path
 from astrbot.api import logger
-from .config import MEMES_DIR, CURRENT_DIR
 
-def ensure_dir_exists(path) -> None:
-    """确保目录存在，不存在则创建"""
-    from pathlib import Path
-    if isinstance(path, Path):
-        path.mkdir(parents=True, exist_ok=True)
-    else:
-        if not os.path.exists(path):
-            os.makedirs(path)
-
-def copy_memes_if_not_exists():
+def should_download_memes(memes_dir):
     """检查表情包目录，如果为空则返回 True（表示需要从 GitHub 下载）"""
-    from pathlib import Path
-    
     # 确保目录存在
-    ensure_dir_exists(MEMES_DIR)
-    
-    # 将 MEMES_DIR 转换为 Path 对象以便统一处理
-    memes_path = Path(MEMES_DIR) if not isinstance(MEMES_DIR, Path) else MEMES_DIR
+    memes_path = Path(memes_dir) if not isinstance(memes_dir, Path) else memes_dir
+    memes_path.mkdir(parents=True, exist_ok=True)
     
     # 检查是否存在任何子文件夹（表情包类别文件夹）
     # 如果存在任何文件夹，说明用户已有表情包，不需要下载
@@ -46,7 +33,8 @@ def copy_memes_if_not_exists():
 def save_json(data: Dict[str, Any], filepath: str) -> bool:
     """保存 JSON 数据到文件"""
     try:
-        ensure_dir_exists(os.path.dirname(filepath))
+        file_path = Path(filepath)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
         with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         return True
@@ -72,16 +60,18 @@ def generate_secret_key(length=8):
     characters = string.ascii_letters + string.digits
     return ''.join(random.choice(characters) for _ in range(length))
 
-async def download_memes_from_github():
-    """从 GitHub Releases 下载默认表情包（zip 文件）"""
+async def download_memes_from_github(plugin_data_dir):
+    """从 GitHub Releases 下载默认表情包（zip 文件）
+    
+    压缩包标准：包含 memes 文件夹，直接解压到 plugin_data_dir 即可
+    """
     import zipfile
     import io
-    from pathlib import Path
     
     # GitHub Releases 下载链接
     ZIP_URL = "https://github.com/Kx501/picx-images-hosting/releases/download/astrbot-memes/memes.zip"
     
-    memes_path = Path(MEMES_DIR) if not isinstance(MEMES_DIR, Path) else MEMES_DIR
+    plugin_data_path = Path(plugin_data_dir) if not isinstance(plugin_data_dir, Path) else plugin_data_dir
     
     try:
         logger.info("开始从 GitHub 下载默认表情包...")
@@ -105,19 +95,20 @@ async def download_memes_from_github():
                 zip_content = await resp.read()
                 logger.info("下载完成，开始解压...")
         
-        # 解压到目标目录
+        # 直接解压到 plugin_data_dir（压缩包内包含 memes 文件夹，解压后会自动创建）
         with zipfile.ZipFile(io.BytesIO(zip_content)) as zip_file:
             # 检查 zip 文件是否有效
             zip_file.testzip()
             
-            # 解压所有文件
-            zip_file.extractall(memes_path)
+            # 解压到 plugin_data_dir
+            zip_file.extractall(plugin_data_path)
             
-            # 统计解压的文件数量
-            file_count = len(zip_file.namelist())
-            logger.info(f"解压完成，共 {file_count} 个文件/目录")
+            # 统计解压的文件数量（排除目录）
+            namelist = zip_file.namelist()
+            file_count = len([name for name in namelist if not (name.endswith("/") or name.endswith("\\"))])
+            logger.info(f"解压完成，共 {file_count} 个文件")
         
-        logger.info(f"默认表情包下载并解压完成: {memes_path}")
+        logger.info(f"默认表情包下载并解压完成: {plugin_data_path}")
         return True
         
     except zipfile.BadZipFile:

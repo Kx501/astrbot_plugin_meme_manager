@@ -1,33 +1,41 @@
 import os
 import logging
+from pathlib import Path
 from typing import Dict, Set, List, Tuple
-from ..config import MEMES_DIR, MEMES_DATA_PATH, DEFAULT_CATEGORY_DESCRIPTIONS
-from ..utils import ensure_dir_exists, save_json, load_json
+from ..constants import DEFAULT_CATEGORY_DESCRIPTIONS
+from ..utils import save_json, load_json
 
 logger = logging.getLogger(__name__)
 
 class CategoryManager:
-    def __init__(self):
-        """初始化类别管理器"""
-        ensure_dir_exists(MEMES_DIR)
+    def __init__(self, memes_dir, memes_data_path):
+        """初始化类别管理器
+        
+        Args:
+            memes_dir: 表情包目录路径
+            memes_data_path: 类别描述数据文件路径
+        """
+        self.memes_dir = Path(memes_dir)
+        self.memes_data_path = Path(memes_data_path)
+        self.memes_dir.mkdir(parents=True, exist_ok=True)
         self._ensure_data_file()
         self.descriptions = self._load_descriptions()
         
     def _ensure_data_file(self) -> None:
         """确保 memes_data.json 文件存在，不存在则创建并写入默认数据"""
-        if not os.path.exists(MEMES_DATA_PATH):
-            save_json(DEFAULT_CATEGORY_DESCRIPTIONS, MEMES_DATA_PATH)
-            logger.info(f"创建默认类别描述文件: {MEMES_DATA_PATH}")
+        if not self.memes_data_path.exists():
+            save_json(DEFAULT_CATEGORY_DESCRIPTIONS, str(self.memes_data_path))
+            logger.info(f"创建默认类别描述文件: {self.memes_data_path}")
             
     def _load_descriptions(self) -> Dict[str, str]:
         """加载类别描述配置"""
-        return load_json(MEMES_DATA_PATH, DEFAULT_CATEGORY_DESCRIPTIONS)
+        return load_json(str(self.memes_data_path), DEFAULT_CATEGORY_DESCRIPTIONS)
     
     def get_local_categories(self) -> Set[str]:
         """获取本地文件夹中的类别"""
         try:
-            return {d for d in os.listdir(MEMES_DIR) 
-                   if os.path.isdir(os.path.join(MEMES_DIR, d))}
+            return {d for d in os.listdir(self.memes_dir) 
+                   if (self.memes_dir / d).is_dir()}
         except Exception as e:
             logger.error(f"获取本地类别失败: {e}")
             return set()
@@ -47,9 +55,9 @@ class CategoryManager:
     def update_description(self, category: str, description: str) -> bool:
         """更新类别描述"""
         try:
-            self.descriptions[category] = description  # 更新内存中的 descriptions
+            self.descriptions[category] = description              # 更新内存中的 descriptions
             # 同步保存到文件
-            return save_json(self.descriptions, MEMES_DATA_PATH)
+            return save_json(self.descriptions, str(self.memes_data_path))
         except Exception as e:
             logger.error(f"更新类别描述失败: {e}")
             return False
@@ -69,13 +77,13 @@ class CategoryManager:
             self.descriptions[new_name] = description
             
             # 更新文件夹名称
-            old_path = os.path.join(MEMES_DIR, old_name)
-            new_path = os.path.join(MEMES_DIR, new_name)
-            if os.path.exists(old_path):
-                os.rename(old_path, new_path)
+            old_path = self.memes_dir / old_name
+            new_path = self.memes_dir / new_name
+            if old_path.exists():
+                old_path.rename(new_path)
             
             # 同步更新内存中的数据
-            return save_json(self.descriptions, MEMES_DATA_PATH)
+            return save_json(self.descriptions, str(self.memes_data_path))
         except Exception as e:
             logger.error(f"重命名类别失败: {e}")
             return False
@@ -88,11 +96,11 @@ class CategoryManager:
             # 从配置中删除
             if category in self.descriptions:
                 del self.descriptions[category]
-                save_json(self.descriptions, MEMES_DATA_PATH)
+                save_json(self.descriptions, str(self.memes_data_path))
             
             # 删除文件夹
-            category_path = os.path.join(MEMES_DIR, category)
-            if os.path.exists(category_path):
+            category_path = self.memes_dir / category
+            if category_path.exists():
                 import shutil
                 shutil.rmtree(category_path)
             
@@ -118,7 +126,7 @@ class CategoryManager:
                     changed = True
             
             if changed:
-                return save_json(self.descriptions, MEMES_DATA_PATH)
+                return save_json(self.descriptions, str(self.memes_data_path))
             return True
         except Exception as e:
             logger.error(f"同步文件系统失败: {e}")

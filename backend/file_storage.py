@@ -2,19 +2,20 @@ import os
 import aiofiles  # 使用 aiofiles 进行异步文件操作
 import logging
 from werkzeug.utils import secure_filename
-from ..config import MEMES_DIR
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 
-async def scan_emoji_folder():
+async def scan_emoji_folder(memes_dir):
     """扫描表情包文件夹，返回所有类别及其表情包"""
     emoji_data = {}
-    if not os.path.exists(MEMES_DIR):
-        os.makedirs(MEMES_DIR)
-    for category in os.listdir(MEMES_DIR):
-        category_path = os.path.join(MEMES_DIR, category)
-        if os.path.isdir(category_path):
+    memes_path = Path(memes_dir)
+    if not memes_path.exists():
+        memes_path.mkdir(parents=True, exist_ok=True)
+    for category in os.listdir(memes_path):
+        category_path = memes_path / category
+        if category_path.is_dir():
             emoji_files = [
                 f
                 for f in os.listdir(category_path)
@@ -26,10 +27,10 @@ async def scan_emoji_folder():
     return emoji_data
 
 
-def get_emoji_by_category(category):
+def get_emoji_by_category(category, memes_dir):
     """获取指定类别下的所有表情包"""
-    category_path = os.path.join(MEMES_DIR, category)
-    if not os.path.isdir(category_path):
+    category_path = Path(memes_dir) / category
+    if not category_path.is_dir():
         return []
     emoji_files = [
         f
@@ -39,13 +40,14 @@ def get_emoji_by_category(category):
     return emoji_files
 
 
-def add_emoji_to_category(category, image_file):
+def add_emoji_to_category(category, image_file, memes_dir):
     """
     添加表情包到指定类别
     
     Args:
         category: 类别名
         image_file: 上传的文件对象
+        memes_dir: 表情包目录路径
     
     Returns:
         str: 保存后的文件路径
@@ -59,10 +61,7 @@ def add_emoji_to_category(category, image_file):
         raise ValueError("文件名为空")
     
     # 使用 pathlib.Path 处理路径，避免路径问题
-    from pathlib import Path
-    
-    # 确保类别目录存在
-    category_path = Path(MEMES_DIR) / category
+    category_path = Path(memes_dir) / category
     category_path.mkdir(parents=True, exist_ok=True)
     
     # 保存文件
@@ -128,30 +127,31 @@ def add_emoji_to_category(category, image_file):
         raise IOError(f"保存文件时出错: {str(e)}")
 
 
-def delete_emoji_from_category(category, image_file):
+def delete_emoji_from_category(category, image_file, memes_dir):
     """删除指定类别下的表情包"""
-    category_path = os.path.join(MEMES_DIR, category)
+    category_path = Path(memes_dir) / category
 
-    if not os.path.isdir(category_path):
+    if not category_path.is_dir():
         return False
-    image_path = os.path.join(category_path, image_file)
-    if os.path.exists(image_path):
-        os.remove(image_path)
+    image_path = category_path / image_file
+    if image_path.exists():
+        image_path.unlink()
         return True
     return False
 
 
-def update_emoji_in_category(category, old_image_file, new_image_file):
+def update_emoji_in_category(category, old_image_file, new_image_file, memes_dir):
     """更新（替换）表情包文件"""
-    category_path = os.path.join(MEMES_DIR, category)
+    category_path = Path(memes_dir) / category
 
-    if not os.path.isdir(category_path):
+    if not category_path.is_dir():
         return False
-    old_image_path = os.path.join(category_path, old_image_file)
-    if os.path.exists(old_image_path):
-        os.remove(old_image_path)
+    old_image_path = category_path / old_image_file
+    if old_image_path.exists():
+        old_image_path.unlink()
         filename = secure_filename(new_image_file.filename)
-        target_path = os.path.join(category_path, filename)
+        target_path = category_path / filename
         new_image_file.save(target_path)
         return True
     return False
+

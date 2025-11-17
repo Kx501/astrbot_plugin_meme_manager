@@ -7,11 +7,11 @@ from quart import (
     redirect,
     url_for,
     session,
-    jsonify
+    jsonify,
+    current_app
 )
 from .backend.api import api
 from .utils import generate_secret_key
-from .config import MEMES_DIR
 import asyncio
 import hypercorn.asyncio
 from hypercorn.config import Config
@@ -73,7 +73,10 @@ async def index():
 
 @app.route("/memes/<category>/<filename>")
 async def serve_emoji(category, filename):
-    category_path = os.path.join(MEMES_DIR, category)
+    memes_dir = current_app.config.get("PLUGIN_CONFIG", {}).get("memes_dir")
+    if not memes_dir:
+        return "Configuration error: memes_dir not found", 500
+    category_path = os.path.join(memes_dir, category)
     if os.path.exists(os.path.join(category_path, filename)):
         return await send_from_directory(category_path, filename)
     else:
@@ -101,7 +104,8 @@ async def start_server(config=None):
     app.config["PLUGIN_CONFIG"] = {
         "img_sync": config.get("img_sync", False),
         "category_manager": config.get("category_manager"),
-        "webui_port": port
+        "webui_port": port,
+        "memes_dir": config.get("memes_dir")
     }
 
     @app.before_serving

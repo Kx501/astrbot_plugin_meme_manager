@@ -1,15 +1,13 @@
 import os
 import json
-import logging
 import re
 import aiohttp
 import random
 import string
 from typing import Dict, Any
 import shutil
+from astrbot.api import logger
 from .config import MEMES_DIR, CURRENT_DIR
-
-logger = logging.getLogger(__name__)
 
 def ensure_dir_exists(path) -> None:
     """确保目录存在，不存在则创建"""
@@ -21,7 +19,7 @@ def ensure_dir_exists(path) -> None:
             os.makedirs(path)
 
 def copy_memes_if_not_exists():
-    """如果 MEMES_DIR 下没有表情包文件，则复制 CURRENT_DIR 下的 memes 文件夹内容"""
+    """检查表情包目录，如果为空则返回 True（表示需要从 GitHub 下载）"""
     from pathlib import Path
     
     # 确保目录存在
@@ -31,33 +29,19 @@ def copy_memes_if_not_exists():
     memes_path = Path(MEMES_DIR) if not isinstance(MEMES_DIR, Path) else MEMES_DIR
     
     # 检查是否存在任何子文件夹（表情包类别文件夹）
-    # 如果存在任何文件夹，说明用户已有表情包，跳过复制以避免覆盖
+    # 如果存在任何文件夹，说明用户已有表情包，不需要下载
     try:
         for item in memes_path.iterdir():
             if item.is_dir():
-                logger.info(f"检测到表情包类别文件夹 {item.name}，跳过默认表情包复制")
-                return
+                logger.info(f"检测到表情包类别文件夹 {item.name}，跳过默认表情包下载")
+                return False
     except (OSError, PermissionError) as e:
         logger.warning(f"无法读取表情包目录 {memes_path}: {e}")
-        return
+        return False
     
-    # 只有当目录完全为空（没有任何文件夹）时，才复制默认表情包
-    source_dir = Path(CURRENT_DIR) / "memes"
-    if not source_dir.exists():
-        logger.warning(f"默认表情包目录不存在: {source_dir}")
-        return
-    
-    # 复制所有文件
-    for item in source_dir.iterdir():
-        src_path = source_dir / item.name
-        dst_path = memes_path / item.name
-        if src_path.is_dir():
-            if not dst_path.exists():
-                shutil.copytree(str(src_path), str(dst_path))
-        else:
-            shutil.copy2(str(src_path), str(dst_path))
-    
-    logger.info(f"已将默认表情包复制到 {memes_path}")
+    # 目录为空，需要从 GitHub 下载
+    logger.info("表情包目录为空，将在后台从 GitHub 自动下载")
+    return True
 
 def save_json(data: Dict[str, Any], filepath: str) -> bool:
     """保存 JSON 数据到文件"""
@@ -87,6 +71,64 @@ def generate_secret_key(length=8):
     """生成随机秘钥"""
     characters = string.ascii_letters + string.digits
     return ''.join(random.choice(characters) for _ in range(length))
+
+async def download_memes_from_github():
+    """从 GitHub Releases 下载默认表情包（zip 文件）"""
+    import zipfile
+    import io
+    from pathlib import Path
+    
+    # GitHub Releases 下载链接
+    ZIP_URL = "https://github.com/Kx501/picx-images-hosting/releases/download/astrbot-memes/memes.zip"
+    
+    memes_path = Path(MEMES_DIR) if not isinstance(MEMES_DIR, Path) else MEMES_DIR
+    
+    try:
+        logger.info("开始从 GitHub 下载默认表情包...")
+        logger.info(f"下载地址: {ZIP_URL}")
+        
+        # 下载 zip 文件
+        async with aiohttp.ClientSession() as session:
+            async with session.get(ZIP_URL, timeout=aiohttp.ClientTimeout(total=300)) as resp:
+                if resp.status != 200:
+                    logger.error(f"下载失败，HTTP状态码: {resp.status}")
+                    logger.error(f"URL: {ZIP_URL}")
+                    return False
+                
+                # 检查文件大小
+                content_length = resp.headers.get('Content-Length')
+                if content_length:
+                    size_mb = int(content_length) / 1024 / 1024
+                    logger.info(f"文件大小: {size_mb:.2f} MB")
+                
+                logger.info("正在下载文件...")
+                zip_content = await resp.read()
+                logger.info("下载完成，开始解压...")
+        
+        # 解压到目标目录
+        with zipfile.ZipFile(io.BytesIO(zip_content)) as zip_file:
+            # 检查 zip 文件是否有效
+            zip_file.testzip()
+            
+            # 解压所有文件
+            zip_file.extractall(memes_path)
+            
+            # 统计解压的文件数量
+            file_count = len(zip_file.namelist())
+            logger.info(f"解压完成，共 {file_count} 个文件/目录")
+        
+        logger.info(f"默认表情包下载并解压完成: {memes_path}")
+        return True
+        
+    except zipfile.BadZipFile:
+        logger.error("下载的文件不是有效的 zip 文件")
+        return False
+    except aiohttp.ClientError as e:
+        logger.error(f"网络请求失败: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"从 GitHub 下载表情包失败: {e}", exc_info=True)
+        return False
 
 async def get_public_ip():
     """异步获取公网IPv4地址"""

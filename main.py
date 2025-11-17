@@ -2,7 +2,6 @@ import re
 import os
 import io
 import random
-import logging
 import time
 import aiohttp
 import ssl
@@ -18,9 +17,10 @@ from astrbot.api.event.filter import EventMessageType
 from astrbot.api.event import ResultContentType
 from astrbot.core.message.components import Plain
 from astrbot.api.all import *
+from astrbot.api import logger
 from astrbot.core.message.message_event_result import MessageChain
 from .webui import run_server, ServerState
-from .utils import get_public_ip, generate_secret_key, dict_to_string, load_json
+from .utils import get_public_ip, generate_secret_key, dict_to_string, load_json, download_memes_from_github
 from .image_host.img_sync import ImageSync
 from .config import MEMES_DIR, MEMES_DATA_PATH, DEFAULT_CATEGORY_DESCRIPTIONS
 from .backend.category_manager import CategoryManager
@@ -95,7 +95,7 @@ class MemeSender(Star):
         self.fault_tolerant_symbols = self.config.get("fault_tolerant_symbols", ["⬡"])
 
         # 初始化 logger
-        self.logger = logging.getLogger(__name__)
+        self.logger = logger
 
         # 记录 R2 初始化日志（如果已初始化）
         if hasattr(self, "_r2_bucket_name"):
@@ -121,6 +121,13 @@ class MemeSender(Star):
         personas = self.context.provider_manager.personas
         self.persona_backup = copy.deepcopy(personas)
         self._reload_personas()
+
+        # 检查是否需要从 GitHub 自动下载表情包
+        from .utils import copy_memes_if_not_exists
+        if copy_memes_if_not_exists():
+            self.logger.info("已启动后台任务，从 GitHub 下载默认表情包")
+            # 使用 asyncio.create_task() 创建后台异步任务，不阻塞启动
+            asyncio.create_task(self._auto_download_from_github())
 
     @filter.command_group("表情管理")
     def meme_manager(self):
@@ -390,6 +397,29 @@ class MemeSender(Star):
 
         except Exception as e:
             self.logger.error(f"重新加载表情配置失败: {str(e)}")
+
+    async def _auto_download_from_github(self):
+        """从 GitHub 自动下载表情包（后台异步任务）"""
+        try:
+            self.logger.info("=" * 60)
+            self.logger.info("开始从 GitHub 下载默认表情包...")
+            self.logger.info("这可能需要一些时间，插件功能可正常使用")
+            self.logger.info("=" * 60)
+            
+            success = await download_memes_from_github()
+            
+            if success:
+                self.logger.info("=" * 60)
+                self.logger.info("✅ 默认表情包下载完成！")
+                self.logger.info("=" * 60)
+                # 重新加载表情配置
+                await self.reload_emotions()
+            else:
+                self.logger.warning("自动下载失败，请检查网络连接")
+                self.logger.info("提示：可以稍后重试或手动下载表情包")
+        except Exception as e:
+            self.logger.error(f"自动下载表情包时出错: {e}", exc_info=True)
+            self.logger.info("提示：可以稍后重试或手动下载表情包")
 
     def _check_meme_directories(self):
         """检查表情包目录是否存在并且包含图片"""

@@ -1,5 +1,5 @@
 import os
-import logging
+from astrbot.api import logger
 from .utils import ensure_dir_exists, save_json, copy_memes_if_not_exists
 from .config import (
     BASE_DATA_DIR,
@@ -7,8 +7,6 @@ from .config import (
     MEMES_DATA_PATH,
     DEFAULT_CATEGORY_DESCRIPTIONS
 )
-
-logger = logging.getLogger(__name__)
 
 def init_plugin():
     """初始化插件，创建必要的目录和配置文件"""

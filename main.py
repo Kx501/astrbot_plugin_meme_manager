@@ -17,7 +17,7 @@ from astrbot.api.all import *
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.event.filter import EventMessageType
 from astrbot.api.message_components import *
-from astrbot.api.provider import LLMResponse
+from astrbot.api.provider import LLMResponse, ProviderRequest
 from astrbot.api.star import Context, Star, register
 from astrbot.core.message.components import Plain
 from astrbot.core.message.message_event_result import MessageChain, ResultContentType
@@ -402,19 +402,22 @@ class MemeSender(Star):
             self.logger.error(f"重新加载表情配置失败: {str(e)}")
 
     @filter.on_llm_request()
-    async def on_llm_request(self, event: AstrMessageEvent):
+    async def on_llm_request(self, event: AstrMessageEvent, req: ProviderRequest):
         """在 LLM 请求时动态注入表情包提示词
         
         使用追加方式而非替换，以兼容其他插件（如 Favour_Ultra）的提示词注入
+        
+        Args:
+            event: 消息事件
+            req: LLM 请求对象
         """
         try:
-            # 获取当前的 LLM 配置
-            llm_config = event.llm_config
-            if llm_config and "prompt" in llm_config:
+            # 在系统提示词中追加表情包提示词
+            if req.prompt:
                 # 追加表情包提示词到现有提示词后面
-                original_prompt = llm_config["prompt"]
-                llm_config["prompt"] = original_prompt + self.sys_prompt_add
-                self.logger.debug(f"动态注入表情包提示词，原始长度: {len(original_prompt)}, 注入后长度: {len(llm_config['prompt'])}")
+                original_prompt = req.prompt
+                req.prompt = original_prompt + self.sys_prompt_add
+                self.logger.debug(f"动态注入表情包提示词，原始长度: {len(original_prompt)}, 注入后长度: {len(req.prompt)}")
         except Exception as e:
             self.logger.error(f"动态注入提示词失败: {str(e)}")
             self.logger.error(traceback.format_exc())
@@ -502,7 +505,7 @@ class MemeSender(Star):
 
         # 第二阶段：替代标记处理（如[emotion]、(emotion)等）
         if self.config.get("enable_alternative_markup", True):
-            # 处理[emotion]格式
+            # 处理[emotion]格式，但排除 Favour_Ultra 的好感度标签
             bracket_pattern = r"\[([^\[\]]+)\]"
             matches = re.finditer(bracket_pattern, clean_text)
             bracket_replacements = []
@@ -511,6 +514,13 @@ class MemeSender(Star):
             for match in matches:
                 original = match.group(0)
                 emotion = match.group(1).strip()
+                
+                # 排除 Favour_Ultra 的标签：
+                # - [好感度 ...] 格式
+                # - [用户申请确认关系 ...] 格式
+                if emotion.startswith("好感度 ") or emotion.startswith("用户申请确认关系 "):
+                    # 保留 Favour_Ultra 的标签，不做任何处理
+                    continue
 
                 if emotion in valid_emoticons:
                     bracket_replacements.append((original, emotion))

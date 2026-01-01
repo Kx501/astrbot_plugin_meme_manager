@@ -1301,6 +1301,48 @@ class MemeSender(Star):
             logger.error(f"从云端同步失败: {str(e)}")
             yield event.plain_result(f"从云端同步失败: {str(e)}")
 
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @meme_manager.command("覆盖到云端")
+    async def overwrite_to_remote(self, event: AstrMessageEvent):
+        """让云端完全和本地一致（会删除云端多出的图）"""
+        if not self.img_sync:
+            yield event.plain_result(
+                "图床服务尚未配置，请先在配置文件中完成图床配置哦。"
+            )
+            return
+
+        try:
+            yield event.plain_result("⚠️ 正在执行覆盖到云端任务（将清理云端多余文件）...")
+            success = await self.img_sync.start_sync("overwrite_to_remote")
+            if success:
+                yield event.plain_result("覆盖到云端任务已完成！云端现在与本地完全一致。")
+            else:
+                yield event.plain_result("任务失败，请查看日志。")
+        except Exception as e:
+            logger.error(f"覆盖到云端失败: {str(e)}")
+            yield event.plain_result(f"覆盖到云端失败: {str(e)}")
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @meme_manager.command("从云端覆盖")
+    async def overwrite_from_remote(self, event: AstrMessageEvent):
+        """让本地完全和云端一致（会删除本地多出的图）"""
+        if not self.img_sync:
+            yield event.plain_result(
+                "图床服务尚未配置，请先在配置文件中完成图床配置哦。"
+            )
+            return
+
+        try:
+            yield event.plain_result("⚠️ 正在执行从云端覆盖任务（将清理本地多余文件）...")
+            success = await self.img_sync.start_sync("overwrite_from_remote")
+            if success:
+                yield event.plain_result("从云端覆盖任务已完成！本地现在与云端完全一致。")
+            else:
+                yield event.plain_result("任务失败，请查看日志。")
+        except Exception as e:
+            logger.error(f"从云端覆盖失败: {str(e)}")
+            yield event.plain_result(f"从云端覆盖失败: {str(e)}")
+
     async def terminate(self):
         """清理资源"""
         # 恢复人格

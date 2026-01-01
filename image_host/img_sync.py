@@ -119,6 +119,12 @@ class ImageSync:
         elif task == "download" and not status.get("to_download"):
             logger.info("没有文件需要下载")
             return True
+        elif task == "overwrite_to_remote" and not (status.get("to_upload") or status.get("to_delete_remote")):
+            logger.info("云端已是最新且完全一致，无需覆盖")
+            return True
+        elif task == "overwrite_from_remote" and not (status.get("to_download") or status.get("to_delete_local")):
+            logger.info("本地已是最新且完全一致，无需覆盖")
+            return True
 
         # 创建并启动进程
         self.sync_process = multiprocessing.Process(
@@ -282,6 +288,16 @@ def run_sync_process(config: dict[str, str], local_dir: str, task: str):
                 f"完整同步完成，上传成功: {upload_success}, 下载成功: {download_success}"
             )
             sys.exit(0 if upload_success and download_success else 1)
+        elif task == "overwrite_to_remote":
+            logger.info("开始覆盖到云端任务")
+            success = sync.sync_manager.overwrite_to_remote()
+            logger.info(f"覆盖到云端完成，成功: {success}")
+            sys.exit(0 if success else 1)
+        elif task == "overwrite_from_remote":
+            logger.info("开始从云端覆盖任务")
+            success = sync.sync_manager.overwrite_from_remote()
+            logger.info(f"从云端覆盖完成，成功: {success}")
+            sys.exit(0 if success else 1)
         else:
             logger.error(f"未知的任务类型: {task}")
             sys.exit(1)

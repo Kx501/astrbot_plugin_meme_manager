@@ -462,13 +462,10 @@ class MemeSender(Star):
             return
 
         text = response.completion_text
-        logger.debug(f"[meme_manager] on_llm_response 开始处理，原始文本长度: {len(text)}")
         
         self.found_emotions = []  # 重置表情列表
         valid_emoticons = set(self.category_mapping.keys())  # 预加载合法表情集合
         
-        logger.debug(f"[meme_manager] 可用表情分类数量: {len(valid_emoticons)}, 分类列表: {sorted(valid_emoticons)}")
-
         clean_text = text
 
         # 第一阶段：严格匹配符号包裹的表情
@@ -489,8 +486,6 @@ class MemeSender(Star):
             else:
                 temp_replacements.append((original, ""))  # 非法表情静默移除
 
-        logger.debug(f"[meme_manager] 严格匹配(&&)阶段找到的表情: {strict_emotions}")
-
         # 保持原始顺序替换
         for original, emotion in temp_replacements:
             clean_text = clean_text.replace(original, "", 1)  # 每次替换第一个匹配项
@@ -502,7 +497,7 @@ class MemeSender(Star):
         paren_emotions = []
         if self.config.get("enable_alternative_markup", True):
             remove_invalid_markup = self.remove_invalid_alternative_markup
-            # 处理[emotion]格式，但排除 Favour_Ultra 的好感度标签
+            # 处理[emotion]格式
             bracket_pattern = r"\[([^\[\]]+)\]"
             matches = re.finditer(bracket_pattern, clean_text)
             bracket_replacements = []
@@ -511,20 +506,11 @@ class MemeSender(Star):
             for match in matches:
                 original = match.group(0)
                 emotion = match.group(1).strip()
-                
-                # 排除 Favour_Ultra 的标签：
-                # - [好感度 ...] 格式
-                # - [用户申请确认关系 ...] 格式
-                if emotion.startswith("好感度 ") or emotion.startswith("用户申请确认关系 "):
-                    # 保留 Favour_Ultra 的标签，不做任何处理
-                    continue
 
                 if emotion in valid_emoticons:
                     bracket_replacements.append((original, emotion))
                 elif remove_invalid_markup:
                     invalid_brackets.append(original)
-
-            logger.debug(f"[meme_manager] 方括号[]阶段找到的表情: {bracket_emotions}")
 
             if remove_invalid_markup:
                 for invalid in invalid_brackets:
@@ -552,8 +538,6 @@ class MemeSender(Star):
                         paren_replacements.append((original, emotion))
                 elif remove_invalid_markup:
                     invalid_parens.append(original)
-
-            logger.debug(f"[meme_manager] 圆括号()阶段找到的表情: {paren_emotions}")
 
             if remove_invalid_markup:
                 for invalid in invalid_parens:
@@ -750,25 +734,6 @@ class MemeSender(Star):
             original_chain = result.chain
             cleaned_components = []
             
-            # 记录原始消息链信息
-            if original_chain:
-                chain_type = type(original_chain).__name__
-                if isinstance(original_chain, str):
-                    chain_length = len(original_chain)
-                elif isinstance(original_chain, MessageChain):
-                    chain_length = len(original_chain.chain)
-                elif isinstance(original_chain, list):
-                    chain_length = len(original_chain)
-                else:
-                    chain_length = 0
-                logger.debug(f"[meme_manager] 原始消息链类型: {chain_type}, 长度: {chain_length}")
-                
-                # 记录清理前的组件详情
-                if isinstance(original_chain, MessageChain):
-                    logger.debug(f"[meme_manager] 清理前的组件详情: {[type(c).__name__ for c in original_chain.chain]}")
-                elif isinstance(original_chain, list):
-                    logger.debug(f"[meme_manager] 清理前的组件详情: {[type(c).__name__ for c in original_chain]}")
-
             if original_chain:
                 # 处理不同类型的消息链
                 if isinstance(original_chain, str):
@@ -810,17 +775,11 @@ class MemeSender(Star):
                         else:
                             cleaned_components.append(component)
             
-            # 记录清理后的组件详情
-            logger.debug(f"[meme_manager] 清理后的组件数量: {len(cleaned_components)}, 详情: {[type(c).__name__ for c in cleaned_components]}")
-
             # 第二步：添加表情图片（如果有找到的表情）
-            logger.debug(f"[meme_manager] found_emotions 列表: {self.found_emotions}")
-            
             if self.found_emotions:
                 # 检查概率（注意：概率判断是"小于等于"才发送）
                 random_value = random.randint(1, 100)
                 threshold = self.emotions_probability
-                logger.info(f"[meme_manager] 概率检查: 随机数={random_value}, 阈值={threshold}, 是否发送图片={random_value <= threshold}")
                 
                 if random_value <= threshold:
                     # 创建表情图片列表
@@ -831,7 +790,6 @@ class MemeSender(Star):
 
                         emotion_path = os.path.join(MEMES_DIR, emotion)
                         path_exists = os.path.exists(emotion_path)
-                        logger.debug(f"[meme_manager] 表情'{emotion}'目录存在: {path_exists}, 路径: {emotion_path}")
                         
                         if not path_exists:
                             continue
@@ -841,7 +799,6 @@ class MemeSender(Star):
                             for f in os.listdir(emotion_path)
                             if f.endswith((".jpg", ".png", ".gif"))
                         ]
-                        logger.debug(f"[meme_manager] 表情'{emotion}'目录中找到 {len(memes)} 个图片")
                         
                         if not memes:
                             continue
@@ -851,7 +808,6 @@ class MemeSender(Star):
 
                         try:
                             emotion_images.append(Image.fromFileSystem(meme_file))
-                            logger.debug(f"[meme_manager] 成功加载表情图片: {meme_file}")
                         except Exception as e:
                             logger.error(f"添加表情图片失败: {e}")
 
@@ -863,41 +819,15 @@ class MemeSender(Star):
                             )
 
                         if use_mixed_message:
-                            # 将图片与文本组件智能配对，支持分段回复
-                            logger.info(
-                                f"找到 {len(emotion_images)} 个表情图片，开始与文本配对"
-                            )
-                            logger.info(
-                                f"配对前的组件数量: {len(cleaned_components)}"
-                            )
                             cleaned_components = self._merge_components_with_images(
                                 cleaned_components, emotion_images
                             )
-                            logger.info(
-                                f"配对后的组件数量: {len(cleaned_components)}"
-                            )
-                            # 打印配对后的组件类型
-                            for i, comp in enumerate(cleaned_components):
-                                comp_type = type(comp).__name__
-                                if isinstance(comp, Plain):
-                                    logger.info(
-                                        f"组件 {i}: {comp_type} - {comp.text[:20]}..."
-                                    )
-                                else:
-                                    logger.info(f"组件 {i}: {comp_type}")
-                            logger.debug(f"[meme_manager] 最终组件列表详情: {[type(c).__name__ for c in cleaned_components]}")
                         else:
                             event.set_extra(
                                 "meme_manager_pending_images", emotion_images
                             )
-                        for i, comp in enumerate(cleaned_components):
-                            comp_type = type(comp).__name__
-                            if isinstance(comp, Plain):
-                                logger.debug(f"组件 {i}: {comp_type} - {comp.text[:20]}...")
-                            else:
-                                logger.debug(f"组件 {i}: {comp_type}")
                     else:
-                        logger.debug("没有找到表情图片")
+                        pass
 
                 # 清空已处理的表情列表
                 self.found_emotions = []
@@ -906,7 +836,6 @@ class MemeSender(Star):
             if cleaned_components:
                 # 直接使用组件列表，不要包装在 MessageChain 中
                 result.chain = cleaned_components
-                logger.debug(f"[meme_manager] result.chain 最终状态: {[type(c).__name__ for c in result.chain]}")
             elif original_chain:
                 # 如果原本有内容但清理后为空，也要更新（避免发送带标签的空消息）
                 # 进行最后的防御性清理

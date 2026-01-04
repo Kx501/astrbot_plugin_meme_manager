@@ -60,6 +60,14 @@ class UploadTracker:
         """获取已上传文件数量"""
         return len(self.uploaded_files)
 
+    def remove_record(self, file_path: Path, category: str = ""):
+        """移除上传记录"""
+        rel_path = str(Path(category) / file_path.name) if category else file_path.name
+        if rel_path in self.uploaded_files:
+            del self.uploaded_files[rel_path]
+            self.save()
+            logger.info(f"移除上传记录: {rel_path}")
+
     def clear_record(self):
         """清空上传记录"""
         self.uploaded_files = {}

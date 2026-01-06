@@ -1,4 +1,5 @@
 from pathlib import Path
+import shutil
 from typing import Dict, Set, List, Tuple
 from ..constants import DEFAULT_CATEGORY_DESCRIPTIONS
 from ..utils import save_json, load_json

@@ -206,8 +206,12 @@
 - `strict_max_emotions_per_message`: 是否严格限制表情数量
 - `enable_loose_emotion_matching`: 是否启用宽松的表情匹配
 - `enable_alternative_markup`: 是否启用备用标记
+- `remove_invalid_alternative_markup`: 是否移除无法识别的备用标记内容
 - `enable_repeated_emotion_detection`: 是否启用重复表情检测
 - `high_confidence_emotions`: 高置信度表情列表
+
+**括号内容被误删的处理：**
+如果遇到括号/方括号内容被过滤（参考 Issue #45），请关闭 `remove_invalid_alternative_markup`。
 
 ### ⚠️ 重要提示
 
@@ -227,6 +231,8 @@
 | `/表情管理 同步状态`        | 🔄 检查同步状态         |
 | `/表情管理 同步到云端`      | ☁️ 将本地表情同步到云端 |
 | `/表情管理 从云端同步`      | ⬇️ 从云端同步表情到本地 |
+| `/表情管理 覆盖到云端`      | ⚠️ 让云端与本地完全一致 |
+| `/表情管理 从云端覆盖`      | ⚠️ 让本地与云端完全一致 |
 
 ## 🖥️ WebUI 功能预览
 

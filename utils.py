@@ -2,6 +2,8 @@ import json
 import re
 import aiohttp
 import random
+import re
+import shutil
 import string
 from typing import Dict, Any
 from pathlib import Path
@@ -28,7 +30,8 @@ def should_download_memes(memes_dir):
     logger.info("表情包目录为空，将在后台自动下载")
     return True
 
-def save_json(data: Dict[str, Any], filepath: str) -> bool:
+
+def save_json(data: dict[str, Any], filepath: str) -> bool:
     """保存 JSON 数据到文件"""
     try:
         file_path = Path(filepath)
@@ -40,23 +43,102 @@ def save_json(data: Dict[str, Any], filepath: str) -> bool:
         logger.error(f"保存 JSON 文件失败 {filepath}: {e}")
         return False
 
-def load_json(filepath: str, default: Dict = None) -> Dict:
+
+def load_json(filepath: str, default: dict = None) -> dict:
     """从文件加载 JSON 数据"""
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
+        with open(filepath, encoding="utf-8") as f:
             return json.load(f)
     except Exception as e:
         logger.error(f"加载 JSON 文件失败 {filepath}: {e}")
         return default if default is not None else {}
 
+
 def dict_to_string(dictionary):
     lines = [f"{key} - {value}" for key, value in dictionary.items()]
     return "\n".join(lines)
 
+
 def generate_secret_key(length=8):
     """生成随机秘钥"""
     characters = string.ascii_letters + string.digits
-    return ''.join(random.choice(characters) for _ in range(length))
+    return "".join(random.choice(characters) for _ in range(length))
+
+
+async def download_memes_from_github(plugin_data_dir):
+    """从 GitHub Releases 下载默认表情包（zip 文件）
+    
+    压缩包标准：包含 memes 文件夹，直接解压到 plugin_data_dir 即可
+    支持使用 astrbot 配置的 HTTP 代理（通过环境变量）
+    """
+    import zipfile
+    import io
+    import os
+    
+    # GitHub Releases 下载链接
+    ZIP_URL = "https://github.com/Kx501/picx-images-hosting/releases/download/astrbot-memes/memes.zip"
+    
+    plugin_data_path = Path(plugin_data_dir) if not isinstance(plugin_data_dir, Path) else plugin_data_dir
+    
+    try:
+        logger.info("开始下载默认表情包...")
+        logger.info(f"下载地址: {ZIP_URL}")
+        
+        # 检查环境变量中的代理配置（astrbot 会设置这些环境变量）
+        # 优先使用 HTTPS_PROXY，如果没有则使用 HTTP_PROXY
+        proxy_url = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or \
+                   os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy")
+        
+        if proxy_url:
+            logger.info(f"使用代理: {proxy_url}")
+        
+        # 下载 zip 文件
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                ZIP_URL, 
+                proxy=proxy_url,  # 直接在请求中使用 proxy 参数
+                timeout=aiohttp.ClientTimeout(total=300)
+            ) as resp:
+                if resp.status != 200:
+                    logger.error(f"下载失败，HTTP状态码: {resp.status}")
+                    logger.error(f"URL: {ZIP_URL}")
+                    return False
+                
+                # 检查文件大小
+                content_length = resp.headers.get('Content-Length')
+                if content_length:
+                    size_mb = int(content_length) / 1024 / 1024
+                    logger.info(f"文件大小: {size_mb:.2f} MB")
+                
+                logger.info("正在下载文件...")
+                zip_content = await resp.read()
+                logger.info("下载完成，开始解压...")
+        
+        # 直接解压到 plugin_data_dir（压缩包内包含 memes 文件夹，解压后会自动创建）
+        with zipfile.ZipFile(io.BytesIO(zip_content)) as zip_file:
+            # 检查 zip 文件是否有效
+            zip_file.testzip()
+            
+            # 解压到 plugin_data_dir
+            zip_file.extractall(plugin_data_path)
+            
+            # 统计解压的文件数量（排除目录）
+            namelist = zip_file.namelist()
+            file_count = len([name for name in namelist if not (name.endswith("/") or name.endswith("\\"))])
+            logger.info(f"解压完成，共 {file_count} 个文件")
+        
+        logger.info(f"默认表情包下载并解压完成: {plugin_data_path}")
+        return True
+        
+    except zipfile.BadZipFile:
+        logger.error("下载的文件不是有效的 zip 文件")
+        return False
+    except aiohttp.ClientError as e:
+        logger.error(f"网络请求失败: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"从 GitHub 下载表情包失败: {e}", exc_info=True)
+        return False
 
 async def download_memes_from_github(plugin_data_dir):
     """从 GitHub Releases 下载默认表情包（zip 文件）
@@ -136,14 +218,14 @@ async def download_memes_from_github(plugin_data_dir):
 async def get_public_ip():
     """异步获取公网IPv4地址"""
     ipv4_apis = [
-        'http://ipv4.ifconfig.me/ip',        # IPv4专用接口
-        'http://api-ipv4.ip.sb/ip',          # 樱花云IPv4接口
-        'http://v4.ident.me',                # IPv4专用
-        'http://ip.qaros.com',               # 备用国内服务
-        'http://ipv4.icanhazip.com',         # IPv4专用
-        'http://4.icanhazip.com'             # 另一个变种地址
+        "http://ipv4.ifconfig.me/ip",  # IPv4专用接口
+        "http://api-ipv4.ip.sb/ip",  # 樱花云IPv4接口
+        "http://v4.ident.me",  # IPv4专用
+        "http://ip.qaros.com",  # 备用国内服务
+        "http://ipv4.icanhazip.com",  # IPv4专用
+        "http://4.icanhazip.com",  # 另一个变种地址
     ]
-    
+
     async with aiohttp.ClientSession() as session:
         for api in ipv4_apis:
             try:
@@ -151,9 +233,9 @@ async def get_public_ip():
                     if response.status == 200:
                         ip = (await response.text()).strip()
                         # 添加二次验证确保是IPv4格式
-                        if re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', ip):
+                        if re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", ip):
                             return ip
-            except:
+            except Exception:
                 continue
-    
+
     return "[服务器公网ip]"

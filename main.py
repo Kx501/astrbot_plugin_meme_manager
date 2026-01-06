@@ -6,11 +6,14 @@ import random
 import re
 import ssl
 import time
+import traceback
 from multiprocessing import Process
 
 import aiohttp
 from PIL import Image as PILImage
 
+from astrbot.api import logger
+from astrbot.api.all import *
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.event.filter import EventMessageType
 from astrbot.api.message_components import *
@@ -112,12 +115,9 @@ class MemeSender(Star):
         # 读取表情包分隔符
         self.fault_tolerant_symbols = self.config.get("fault_tolerant_symbols", ["⬡"])
 
-        # 初始化 logger
-        self.logger = logger
-
         # 记录 R2 初始化日志（如果已初始化）
         if hasattr(self, "_r2_bucket_name"):
-            self.logger.info(f"Cloudflare R2 图床已初始化: {self._r2_bucket_name}")
+            logger.info(f"Cloudflare R2 图床已初始化: {self._r2_bucket_name}")
             delattr(self, "_r2_bucket_name")
 
         # 处理人格
@@ -130,12 +130,21 @@ class MemeSender(Star):
             "strict_max_emotions_per_message"
         )
 
+        # 混合消息相关配置
+        self.enable_mixed_message = self.config.get("enable_mixed_message", True)
+        self.mixed_message_probability = self.config.get(
+            "mixed_message_probability", 80
+        )
+        self.remove_invalid_alternative_markup = self.config.get(
+            "remove_invalid_alternative_markup", False
+        )
+
         # 内容清理规则
         self.content_cleanup_rule = self.config.get(
             "content_cleanup_rule", "&&[a-zA-Z]*&&"
         )
 
-        # 更新人格
+        # 构建表情包提示词
         personas = self.context.provider_manager.personas
         self.persona_backup = copy.deepcopy(personas)
         self._reload_personas()
@@ -236,7 +245,7 @@ class MemeSender(Star):
             )
 
         except Exception as e:
-            self.logger.error(f"启动失败: {str(e)}")
+            logger.error(f"启动失败: {str(e)}")
             yield event.plain_result(
                 f"⚠️ 后台启动失败，请稍后重试\n（错误代码：{str(e)}）"
             )
@@ -282,10 +291,10 @@ class MemeSender(Star):
                 self.webui_process.terminate()
                 self.webui_process.join()
         self.webui_process = None
-        self.logger.info("资源清理完成")
+        logger.info("资源清理完成")
 
     def _reload_personas(self):
-        """重新注入人格"""
+        """重新加载表情配置并构建提示词并注入全局人格"""
         self.category_mapping = load_json(
             str(self.memes_data_path), DEFAULT_CATEGORY_DESCRIPTIONS
         )
@@ -297,6 +306,7 @@ class MemeSender(Star):
             + str(self.max_emotions_per_message)
             + self.prompt_tail_2
         )
+        # 注入全局人格，以便利用缓存并减少对聊天内容的影响
         personas = self.context.provider_manager.personas
         for persona, persona_backup in zip(personas, self.persona_backup):
             persona["prompt"] = persona_backup["prompt"] + self.sys_prompt_add
@@ -371,7 +381,7 @@ class MemeSender(Star):
                     # 特殊处理腾讯多媒体域名
                     if "multimedia.nt.qq.com.cn" in img.url:
                         insecure_url = img.url.replace("https://", "http://", 1)
-                        self.logger.warning(
+                        logger.warning(
                             f"检测到腾讯多媒体域名，使用 HTTP 协议下载: {insecure_url}"
                         )
                         async with aiohttp.ClientSession() as session:
@@ -388,7 +398,7 @@ class MemeSender(Star):
                         with PILImage.open(io.BytesIO(content)) as img:
                             file_type = img.format.lower()
                     except Exception as e:
-                        self.logger.error(f"图片格式检测失败: {str(e)}")
+                        logger.error(f"图片格式检测失败: {str(e)}")
                         file_type = "unknown"
 
                     ext_mapping = {
@@ -406,7 +416,7 @@ class MemeSender(Star):
                     saved_files.append(filename)
 
                 except Exception as e:
-                    self.logger.error(f"下载图片失败: {str(e)}")
+                    logger.error(f"下载图片失败: {str(e)}")
                     yield event.plain_result(f"文件 {img.url} 下载失败啦: {str(e)}")
                     continue
 
@@ -436,9 +446,34 @@ class MemeSender(Star):
         """动态重新加载表情配置"""
         try:
             self.category_manager.sync_with_filesystem()
-
+            
+            # 重新加载表情配置后，需要重新构建提示词
+            self._reload_personas()
         except Exception as e:
-            self.logger.error(f"重新加载表情配置失败: {str(e)}")
+            logger.error(f"重新加载表情配置失败: {str(e)}")
+
+    async def _auto_download_from_github(self):
+        """从 GitHub 自动下载表情包（后台异步任务）"""
+        try:
+            self.logger.info("=" * 60)
+            self.logger.info("准备从 GitHub 下载默认表情包")
+            self.logger.info("这可能需要一些时间，插件功能可正常使用")
+            self.logger.info("=" * 60)
+            
+            success = await download_memes_from_github(self.plugin_data_dir)
+            
+            if success:
+                self.logger.info("=" * 60)
+                self.logger.info("默认表情包下载完成！")
+                self.logger.info("=" * 60)
+                # 重新加载表情配置
+                await self.reload_emotions()
+            else:
+                self.logger.warning("自动下载失败，请检查网络连接")
+                self.logger.info("提示：可以稍后重试或手动下载表情包")
+        except Exception as e:
+            self.logger.error(f"自动下载表情包时出错: {e}", exc_info=True)
+            self.logger.info("提示：可以稍后重试或手动下载表情包")
 
     async def _auto_download_from_github(self):
         """从 GitHub 自动下载表情包（后台异步任务）"""
@@ -473,9 +508,10 @@ class MemeSender(Star):
         Returns:
             True如果位置在thinking标签内，False否则
         """
-        import re
         # 找到所有thinking标签的开始和结束位置
-        thinking_pattern = re.compile(r"<think(?:ing)?>.*?</think(?:ing)?>", re.DOTALL | re.IGNORECASE)
+        thinking_pattern = re.compile(
+            r"<think(?:ing)?>.*?</think(?:ing)?>", re.DOTALL | re.IGNORECASE
+        )
 
         for match in thinking_pattern.finditer(text):
             if match.start() <= position < match.end():
@@ -484,15 +520,15 @@ class MemeSender(Star):
 
     def _check_meme_directories(self):
         """检查表情包目录是否存在并且包含图片"""
-        self.logger.info(f"开始检查表情包根目录: {self.memes_dir}")
+        logger.info(f"开始检查表情包根目录: {self.memes_dir}")
         if not os.path.exists(self.memes_dir):
-            self.logger.error(f"表情包根目录不存在，请检查: {self.memes_dir}")
+            logger.error(f"表情包根目录不存在，请检查: {self.memes_dir}")
             return
 
         for emotion in self.category_manager.get_descriptions().values():
             emotion_path = os.path.join(self.memes_dir, emotion)
             if not os.path.exists(emotion_path):
-                self.logger.error(
+                logger.error(
                     f"表情分类 {emotion} 对应的目录不存在，请查看: {emotion_path}"
                 )
                 continue
@@ -503,9 +539,9 @@ class MemeSender(Star):
                 if f.endswith((".jpg", ".png", ".gif"))
             ]
             if not memes:
-                self.logger.error(f"表情分类 {emotion} 对应的目录为空: {emotion_path}")
+                logger.error(f"表情分类 {emotion} 对应的目录为空: {emotion_path}")
             else:
-                self.logger.info(
+                logger.info(
                     f"表情分类 {emotion} 对应的目录 {emotion_path} 包含 {len(memes)} 个图片"
                 )
 
@@ -517,9 +553,10 @@ class MemeSender(Star):
             return
 
         text = response.completion_text
+        
         self.found_emotions = []  # 重置表情列表
         valid_emoticons = set(self.category_mapping.keys())  # 预加载合法表情集合
-
+        
         clean_text = text
 
         # 第一阶段：严格匹配符号包裹的表情
@@ -528,6 +565,7 @@ class MemeSender(Star):
 
         # 严格模式处理
         temp_replacements = []
+        strict_emotions = []
         for match in matches:
             original = match.group(0)
             emotion = match.group(1).strip()
@@ -535,6 +573,7 @@ class MemeSender(Star):
             # 合法性验证
             if emotion in valid_emoticons:
                 temp_replacements.append((original, emotion))
+                strict_emotions.append(emotion)
             else:
                 temp_replacements.append((original, ""))  # 非法表情静默移除
 
@@ -545,12 +584,15 @@ class MemeSender(Star):
                 self.found_emotions.append(emotion)
 
         # 第二阶段：替代标记处理（如[emotion]、(emotion)等）
+        bracket_emotions = []
+        paren_emotions = []
         if self.config.get("enable_alternative_markup", True):
+            remove_invalid_markup = self.remove_invalid_alternative_markup
             # 处理[emotion]格式
             bracket_pattern = r"\[([^\[\]]+)\]"
             matches = re.finditer(bracket_pattern, clean_text)
             bracket_replacements = []
-            invalid_brackets = []
+            invalid_brackets = [] if remove_invalid_markup else None
 
             for match in matches:
                 original = match.group(0)
@@ -558,13 +600,12 @@ class MemeSender(Star):
 
                 if emotion in valid_emoticons:
                     bracket_replacements.append((original, emotion))
-                else:
-                    # 记录无效标记，稍后删除
+                elif remove_invalid_markup:
                     invalid_brackets.append(original)
 
-            # 删除所有无效标记
-            for invalid in invalid_brackets:
-                clean_text = clean_text.replace(invalid, "", 1)
+            if remove_invalid_markup:
+                for invalid in invalid_brackets:
+                    clean_text = clean_text.replace(invalid, "", 1)
 
             for original, emotion in bracket_replacements:
                 clean_text = clean_text.replace(original, "", 1)
@@ -574,7 +615,7 @@ class MemeSender(Star):
             paren_pattern = r"\(([^()]+)\)"
             matches = re.finditer(paren_pattern, clean_text)
             paren_replacements = []
-            invalid_parens = []
+            invalid_parens = [] if remove_invalid_markup else None
 
             for match in matches:
                 original = match.group(0)
@@ -586,19 +627,19 @@ class MemeSender(Star):
                         original, clean_text, match.start()
                     ):
                         paren_replacements.append((original, emotion))
-                else:
-                    # 记录无效标记，稍后删除
+                elif remove_invalid_markup:
                     invalid_parens.append(original)
 
-            # 删除所有无效标记
-            for invalid in invalid_parens:
-                clean_text = clean_text.replace(invalid, "", 1)
+            if remove_invalid_markup:
+                for invalid in invalid_parens:
+                    clean_text = clean_text.replace(invalid, "", 1)
 
             for original, emotion in paren_replacements:
                 clean_text = clean_text.replace(original, "", 1)
                 self.found_emotions.append(emotion)
 
         # 第三阶段：处理重复表情模式（如angryangryangry）
+        repeated_emotions = []
         if self.config.get("enable_repeated_emotion_detection", True):
             high_confidence_emotions = self.config.get("high_confidence_emotions", [])
 
@@ -614,11 +655,14 @@ class MemeSender(Star):
                     matches = re.finditer(repeat_pattern, clean_text)
                     for match in matches:
                         # 跳过thinking标签内的内容
-                        if self._is_position_in_thinking_tags(clean_text, match.start()):
+                        if self._is_position_in_thinking_tags(
+                            clean_text, match.start()
+                        ):
                             continue
                         original = match.group(0)
                         clean_text = clean_text.replace(original, "", 1)
                         self.found_emotions.append(emotion)
+                        repeated_emotions.append(emotion)
                 else:
                     # 普通表情词需要重复至少3次才识别
                     # 只检查长度>=4的表情，以减少误判
@@ -628,13 +672,19 @@ class MemeSender(Star):
                         matches = re.finditer(repeat_pattern, clean_text)
                         for match in matches:
                             # 跳过thinking标签内的内容
-                            if self._is_position_in_thinking_tags(clean_text, match.start()):
+                            if self._is_position_in_thinking_tags(
+                                clean_text, match.start()
+                            ):
                                 continue
                             original = match.group(0)
                             clean_text = clean_text.replace(original, "", 1)
                             self.found_emotions.append(emotion)
+                            repeated_emotions.append(emotion)
+
+        logger.debug(f"[meme_manager] 重复检测阶段找到的表情: {repeated_emotions}")
 
         # 第四阶段：智能识别可能的表情（松散模式）
+        loose_emotions = []
         if self.config.get("enable_loose_emotion_matching", True):
             # 查找所有可能的表情词
             for emotion in valid_emoticons:
@@ -654,10 +704,13 @@ class MemeSender(Star):
                     ):
                         # 添加到表情列表
                         self.found_emotions.append(word)
+                        loose_emotions.append(word)
                         # 替换文本中的表情词
                         clean_text = (
                             clean_text[:position] + clean_text[position + len(word) :]
                         )
+
+        logger.debug(f"[meme_manager] 松散匹配阶段找到的表情: {loose_emotions}")
 
         # 去重并应用数量限制
         seen = set()
@@ -670,10 +723,12 @@ class MemeSender(Star):
                 break
 
         self.found_emotions = filtered_emotions
+        logger.info(f"[meme_manager] 去重后的最终表情列表: {self.found_emotions}")
 
         # 防御性清理残留符号
         clean_text = re.sub(r"&&+", "", clean_text)  # 清除未成对的&&符号
         response.completion_text = clean_text.strip()
+        logger.debug(f"[meme_manager] 清理后的最终文本内容长度: {len(response.completion_text)}")
 
     def _is_likely_emotion_markup(self, markup, text, position):
         """判断一个标记是否可能是表情而非普通文本的一部分"""
@@ -756,20 +811,29 @@ class MemeSender(Star):
     @filter.on_decorating_result(priority=99999)
     async def on_decorating_result(self, event: AstrMessageEvent):
         """在消息发送前清理文本中的表情标签，并添加表情图片"""
+        logger.debug("[meme_manager] on_decorating_result 开始处理")
+        
         result = event.get_result()
-        if not result or result.result_content_type == ResultContentType.STREAMING_FINISH:
+        if (
+            not result
+            or result.result_content_type == ResultContentType.STREAMING_FINISH
+        ):
             return
 
         try:
             # 第一步：获取并清理原始消息链中的文本
             original_chain = result.chain
             cleaned_components = []
-
+            
             if original_chain:
                 # 处理不同类型的消息链
                 if isinstance(original_chain, str):
                     # 字符串类型：清理后转为 Plain 组件
-                    cleaned = re.sub(self.content_cleanup_rule, "", original_chain) if self.content_cleanup_rule else original_chain
+                    cleaned = (
+                        re.sub(self.content_cleanup_rule, "", original_chain)
+                        if self.content_cleanup_rule
+                        else original_chain
+                    )
                     if cleaned.strip():
                         cleaned_components.append(Plain(cleaned.strip()))
 
@@ -777,7 +841,11 @@ class MemeSender(Star):
                     # MessageChain 类型：遍历清理 Plain 组件
                     for component in original_chain.chain:
                         if isinstance(component, Plain):
-                            cleaned = re.sub(self.content_cleanup_rule, "", component.text) if self.content_cleanup_rule else component.text
+                            cleaned = (
+                                re.sub(self.content_cleanup_rule, "", component.text)
+                                if self.content_cleanup_rule
+                                else component.text
+                            )
                             if cleaned.strip():
                                 cleaned_components.append(Plain(cleaned.strip()))
                         else:
@@ -788,16 +856,23 @@ class MemeSender(Star):
                     # 列表类型：遍历清理 Plain 组件
                     for component in original_chain:
                         if isinstance(component, Plain):
-                            cleaned = re.sub(self.content_cleanup_rule, "", component.text) if self.content_cleanup_rule else component.text
+                            cleaned = (
+                                re.sub(self.content_cleanup_rule, "", component.text)
+                                if self.content_cleanup_rule
+                                else component.text
+                            )
                             if cleaned.strip():
                                 cleaned_components.append(Plain(cleaned.strip()))
                         else:
                             cleaned_components.append(component)
-
+            
             # 第二步：添加表情图片（如果有找到的表情）
             if self.found_emotions:
                 # 检查概率（注意：概率判断是"小于等于"才发送）
-                if random.randint(1, 100) <= self.emotions_probability:
+                random_value = random.randint(1, 100)
+                threshold = self.emotions_probability
+                
+                if random_value <= threshold:
                     # 创建表情图片列表
                     emotion_images = []
                     for emotion in self.found_emotions:
@@ -805,7 +880,9 @@ class MemeSender(Star):
                             continue
 
                         emotion_path = os.path.join(self.memes_dir, emotion)
-                        if not os.path.exists(emotion_path):
+                        path_exists = os.path.exists(emotion_path)
+                        
+                        if not path_exists:
                             continue
 
                         memes = [
@@ -813,6 +890,7 @@ class MemeSender(Star):
                             for f in os.listdir(emotion_path)
                             if f.endswith((".jpg", ".png", ".gif"))
                         ]
+                        
                         if not memes:
                             continue
 
@@ -822,23 +900,25 @@ class MemeSender(Star):
                         try:
                             emotion_images.append(Image.fromFileSystem(meme_file))
                         except Exception as e:
-                            self.logger.error(f"添加表情图片失败: {e}")
+                            logger.error(f"添加表情图片失败: {e}")
 
-                    # 将图片与文本组件智能配对，支持分段回复
                     if emotion_images:
-                        self.logger.info(f"找到 {len(emotion_images)} 个表情图片，开始与文本配对")
-                        self.logger.info(f"配对前的组件数量: {len(cleaned_components)}")
-                        cleaned_components = self._merge_components_with_images(cleaned_components, emotion_images)
-                        self.logger.info(f"配对后的组件数量: {len(cleaned_components)}")
-                        # 打印配对后的组件类型
-                        for i, comp in enumerate(cleaned_components):
-                            comp_type = type(comp).__name__
-                            if isinstance(comp, Plain):
-                                self.logger.info(f"组件 {i}: {comp_type} - {comp.text[:20]}...")
-                            else:
-                                self.logger.info(f"组件 {i}: {comp_type}")
+                        use_mixed_message = False
+                        if self.enable_mixed_message:
+                            use_mixed_message = (
+                                random.randint(1, 100) <= self.mixed_message_probability
+                            )
+
+                        if use_mixed_message:
+                            cleaned_components = self._merge_components_with_images(
+                                cleaned_components, emotion_images
+                            )
+                        else:
+                            event.set_extra(
+                                "meme_manager_pending_images", emotion_images
+                            )
                     else:
-                        self.logger.info("没有找到表情图片")
+                        pass
 
                 # 清空已处理的表情列表
                 self.found_emotions = []
@@ -851,7 +931,9 @@ class MemeSender(Star):
                 # 如果原本有内容但清理后为空，也要更新（避免发送带标签的空消息）
                 # 进行最后的防御性清理
                 if isinstance(original_chain, str):
-                    final_cleaned = re.sub(r"&&+", "", original_chain)  # 清除残留的&&符号
+                    final_cleaned = re.sub(
+                        r"&&+", "", original_chain
+                    )  # 清除残留的&&符号
                     if final_cleaned.strip():
                         result.chain = [Plain(final_cleaned.strip())]
                 elif isinstance(original_chain, MessageChain):
@@ -866,18 +948,33 @@ class MemeSender(Star):
                             final_components.append(component)
                     if final_components:
                         result.chain = final_components
+            
+            logger.debug("[meme_manager] on_decorating_result 处理完成")
 
         except Exception as e:
-            self.logger.error(f"处理消息装饰失败: {str(e)}")
-            import traceback
-            self.logger.error(traceback.format_exc())
+            logger.error(f"处理消息装饰失败: {str(e)}")
+            logger.error(traceback.format_exc())
 
     @filter.after_message_sent()
     async def after_message_sent(self, event: AstrMessageEvent):
-        """消息发送后处理。目前无需操作，逻辑已前置到 decorate_message。"""
-        # 此处的逻辑已移至 on_decorating_result 钩子，以兼容不支持主动消息的平台。
-        # 保留此空函数用于可能的调试或未来扩展。
-        pass
+        """消息发送后处理。用于发送未混合的表情图片。"""
+        pending_images = event.get_extra("meme_manager_pending_images")
+        if not pending_images:
+            return
+
+        try:
+            for image in pending_images:
+                if event.get_platform_name() == "gewechat":
+                    await event.send(MessageChain([image]))
+                else:
+                    await self.context.send_message(
+                        event.unified_msg_origin, MessageChain([image])
+                    )
+        except Exception as e:
+            logger.error(f"发送表情图片失败: {str(e)}")
+            logger.error(traceback.format_exc())
+        finally:
+            event.set_extra("meme_manager_pending_images", None)
 
     @meme_manager.command("同步状态")
     async def check_sync_status(self, event: AstrMessageEvent, detail: str = None):
@@ -913,7 +1010,7 @@ class MemeSender(Star):
                 "📈 文件统计:",
                 f"  • 需要上传: {len(to_upload)} 个文件",
                 f"  • 需要下载: {len(to_download)} 个文件",
-                ""
+                "",
             ]
 
             # 分类统计
@@ -931,14 +1028,18 @@ class MemeSender(Star):
             # 显示上传分类统计
             if upload_categories:
                 result.append("📤 待上传文件分类:")
-                for cat, count in sorted(upload_categories.items(), key=lambda x: x[1], reverse=True):
+                for cat, count in sorted(
+                    upload_categories.items(), key=lambda x: x[1], reverse=True
+                ):
                     result.append(f"  • {cat}: {count} 个")
                 result.append("")
 
             # 显示下载分类统计
             if download_categories:
                 result.append("📥 待下载文件分类:")
-                for cat, count in sorted(download_categories.items(), key=lambda x: x[1], reverse=True):
+                for cat, count in sorted(
+                    download_categories.items(), key=lambda x: x[1], reverse=True
+                ):
                     result.append(f"  • {cat}: {count} 个")
                 result.append("")
 
@@ -946,7 +1047,9 @@ class MemeSender(Star):
             if to_upload:
                 result.append("📤 待上传文件示例（前5个）:")
                 for file in to_upload[:5]:
-                    result.append(f"  • {file.get('category', '未分类')}/{file['filename']}")
+                    result.append(
+                        f"  • {file.get('category', '未分类')}/{file['filename']}"
+                    )
                 if len(to_upload) > 5:
                     result.append(f"  • ...还有 {len(to_upload) - 5} 个文件")
                 result.append("")
@@ -954,7 +1057,9 @@ class MemeSender(Star):
             if to_download:
                 result.append("📥 待下载文件示例（前5个）:")
                 for file in to_download[:5]:
-                    result.append(f"  • {file.get('category', '未分类')}/{file['filename']}")
+                    result.append(
+                        f"  • {file.get('category', '未分类')}/{file['filename']}"
+                    )
                 if len(to_download) > 5:
                     result.append(f"  • ...还有 {len(to_download) - 5} 个文件")
                 result.append("")
@@ -979,11 +1084,17 @@ class MemeSender(Star):
 
                             if remote_stats:
                                 result.append("📂 云端文件分类详情:")
-                                for cat, count in sorted(remote_stats.items(), key=lambda x: x[1], reverse=True):
+                                for cat, count in sorted(
+                                    remote_stats.items(),
+                                    key=lambda x: x[1],
+                                    reverse=True,
+                                ):
                                     result.append(f"  • {cat}: {count} 个")
 
                                 # 显示文件总数
-                                result.append(f"📊 云端总计: {len(remote_images)} 个文件")
+                                result.append(
+                                    f"📊 云端总计: {len(remote_images)} 个文件"
+                                )
                             else:
                                 result.append("📂 云端无文件")
                     except Exception as e:
@@ -996,8 +1107,13 @@ class MemeSender(Star):
                         for category in os.listdir(self.memes_dir):
                             category_path = os.path.join(self.memes_dir, category)
                             if os.path.isdir(category_path):
-                                files = [f for f in os.listdir(category_path)
-                                       if f.endswith((".jpg", ".jpeg", ".png", ".gif", ".webp"))]
+                                files = [
+                                    f
+                                    for f in os.listdir(category_path)
+                                    if f.endswith(
+                                        (".jpg", ".jpeg", ".png", ".gif", ".webp")
+                                    )
+                                ]
                                 count = len(files)
                                 local_stats[category] = count
                                 local_total += count
@@ -1005,7 +1121,9 @@ class MemeSender(Star):
                     if local_stats:
                         result.append("")
                         result.append("📂 本地文件分类详情:")
-                        for cat, count in sorted(local_stats.items(), key=lambda x: x[1], reverse=True):
+                        for cat, count in sorted(
+                            local_stats.items(), key=lambda x: x[1], reverse=True
+                        ):
                             result.append(f"  • {cat}: {count} 个")
                         result.append(f"📊 本地总计: {local_total} 个文件")
                     else:
@@ -1013,22 +1131,31 @@ class MemeSender(Star):
                         result.append("📂 本地无文件")
             else:
                 result.append("⏳ 需要同步以保持云端与本地图库一致")
-                result.append("💡 使用 '/表情管理 同步到云端' 或 '/表情管理 从云端同步' 进行同步")
+                result.append(
+                    "💡 使用 '/表情管理 同步到云端' 或 '/表情管理 从云端同步' 进行同步"
+                )
 
             # 上传记录统计（如果有的话）
-            if hasattr(self.img_sync.sync_manager, "upload_tracker") and self.img_sync.sync_manager.upload_tracker:
+            if (
+                hasattr(self.img_sync.sync_manager, "upload_tracker")
+                and self.img_sync.sync_manager.upload_tracker
+            ):
                 try:
                     # 获取上传记录总数
-                    if hasattr(self.img_sync.sync_manager.upload_tracker, "get_uploaded_files"):
+                    if hasattr(
+                        self.img_sync.sync_manager.upload_tracker, "get_uploaded_files"
+                    ):
                         uploaded_files = self.img_sync.sync_manager.upload_tracker.get_uploaded_files()
                         result.append("")
-                        result.append(f"📝 上传记录: 已记录 {len(uploaded_files)} 个文件")
+                        result.append(
+                            f"📝 上传记录: 已记录 {len(uploaded_files)} 个文件"
+                        )
                 except Exception:
                     pass  # 忽略获取上传记录时的错误
 
             yield event.plain_result("\n".join(result))
         except Exception as e:
-            self.logger.error(f"检查同步状态失败: {str(e)}")
+            logger.error(f"检查同步状态失败: {str(e)}")
             yield event.plain_result(f"检查同步状态失败: {str(e)}")
 
     @filter.permission_type(filter.PermissionType.ADMIN)
@@ -1049,18 +1176,14 @@ class MemeSender(Star):
             else:
                 yield event.plain_result("云端同步失败，请查看日志哦。")
         except Exception as e:
-            self.logger.error(f"同步到云端失败: {str(e)}")
+            logger.error(f"同步到云端失败: {str(e)}")
             yield event.plain_result(f"同步到云端失败: {str(e)}")
 
     @meme_manager.command("图库统计")
     async def show_library_stats(self, event: AstrMessageEvent):
         """显示图库详细统计信息"""
         try:
-            result = [
-                "📊 表情包图库统计报告",
-                "",
-                "📁 本地图库统计:"
-            ]
+            result = ["📊 表情包图库统计报告", "", "📁 本地图库统计:"]
 
             # 统计本地文件
             local_stats = {}
@@ -1070,8 +1193,11 @@ class MemeSender(Star):
                 for category in os.listdir(self.memes_dir):
                     category_path = os.path.join(self.memes_dir, category)
                     if os.path.isdir(category_path):
-                        files = [f for f in os.listdir(category_path)
-                               if f.endswith((".jpg", ".jpeg", ".png", ".gif", ".webp"))]
+                        files = [
+                            f
+                            for f in os.listdir(category_path)
+                            if f.endswith((".jpg", ".jpeg", ".png", ".gif", ".webp"))
+                        ]
                         count = len(files)
                         local_stats[category] = count
                         local_total += count
@@ -1082,7 +1208,9 @@ class MemeSender(Star):
                 result.append(f"  • 分类数: {len(local_stats)} 个")
                 result.append("")
                 result.append("📂 本地分类详情:")
-                for cat, count in sorted(local_stats.items(), key=lambda x: x[1], reverse=True):
+                for cat, count in sorted(
+                    local_stats.items(), key=lambda x: x[1], reverse=True
+                ):
                     result.append(f"  • {cat}: {count} 个")
             else:
                 result.append("  • 本地图库为空")
@@ -1105,7 +1233,9 @@ class MemeSender(Star):
                     result.append(f"  • 分类数: {len(remote_stats)} 个")
                     result.append("")
                     result.append("📂 云端分类详情:")
-                    for cat, count in sorted(remote_stats.items(), key=lambda x: x[1], reverse=True):
+                    for cat, count in sorted(
+                        remote_stats.items(), key=lambda x: x[1], reverse=True
+                    ):
                         result.append(f"  • {cat}: {count} 个")
 
                     # 对比统计
@@ -1115,9 +1245,13 @@ class MemeSender(Star):
                     result.append(f"  • 云端文件: {remote_total} 个")
 
                     if local_total > remote_total:
-                        result.append(f"  • 本地比云端多 {local_total - remote_total} 个文件")
+                        result.append(
+                            f"  • 本地比云端多 {local_total - remote_total} 个文件"
+                        )
                     elif remote_total > local_total:
-                        result.append(f"  • 云端比本地多 {remote_total - local_total} 个文件")
+                        result.append(
+                            f"  • 云端比本地多 {remote_total - local_total} 个文件"
+                        )
                     else:
                         result.append("  • 本地与云端文件数相同")
 
@@ -1130,9 +1264,13 @@ class MemeSender(Star):
                     common_categories = local_categories & remote_categories
 
                     if only_local:
-                        result.append(f"  • 仅本地有的分类: {', '.join(sorted(only_local))}")
+                        result.append(
+                            f"  • 仅本地有的分类: {', '.join(sorted(only_local))}"
+                        )
                     if only_remote:
-                        result.append(f"  • 仅云端有的分类: {', '.join(sorted(only_remote))}")
+                        result.append(
+                            f"  • 仅云端有的分类: {', '.join(sorted(only_remote))}"
+                        )
                     if common_categories:
                         result.append(f"  • 共同分类: {len(common_categories)} 个")
 
@@ -1157,7 +1295,7 @@ class MemeSender(Star):
             yield event.plain_result("\n".join(result))
 
         except Exception as e:
-            self.logger.error(f"获取图库统计失败: {str(e)}")
+            logger.error(f"获取图库统计失败: {str(e)}")
             yield event.plain_result(f"获取图库统计失败: {str(e)}")
 
     @filter.permission_type(filter.PermissionType.ADMIN)
@@ -1180,8 +1318,50 @@ class MemeSender(Star):
             else:
                 yield event.plain_result("从云端同步失败，请查看日志哦。")
         except Exception as e:
-            self.logger.error(f"从云端同步失败: {str(e)}")
+            logger.error(f"从云端同步失败: {str(e)}")
             yield event.plain_result(f"从云端同步失败: {str(e)}")
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @meme_manager.command("覆盖到云端")
+    async def overwrite_to_remote(self, event: AstrMessageEvent):
+        """让云端完全和本地一致（会删除云端多出的图）"""
+        if not self.img_sync:
+            yield event.plain_result(
+                "图床服务尚未配置，请先在配置文件中完成图床配置哦。"
+            )
+            return
+
+        try:
+            yield event.plain_result("⚠️ 正在执行覆盖到云端任务（将清理云端多余文件）...")
+            success = await self.img_sync.start_sync("overwrite_to_remote")
+            if success:
+                yield event.plain_result("覆盖到云端任务已完成！云端现在与本地完全一致。")
+            else:
+                yield event.plain_result("任务失败，请查看日志。")
+        except Exception as e:
+            logger.error(f"覆盖到云端失败: {str(e)}")
+            yield event.plain_result(f"覆盖到云端失败: {str(e)}")
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @meme_manager.command("从云端覆盖")
+    async def overwrite_from_remote(self, event: AstrMessageEvent):
+        """让本地完全和云端一致（会删除本地多出的图）"""
+        if not self.img_sync:
+            yield event.plain_result(
+                "图床服务尚未配置，请先在配置文件中完成图床配置哦。"
+            )
+            return
+
+        try:
+            yield event.plain_result("⚠️ 正在执行从云端覆盖任务（将清理本地多余文件）...")
+            success = await self.img_sync.start_sync("overwrite_from_remote")
+            if success:
+                yield event.plain_result("从云端覆盖任务已完成！本地现在与云端完全一致。")
+            else:
+                yield event.plain_result("任务失败，请查看日志。")
+        except Exception as e:
+            logger.error(f"从云端覆盖失败: {str(e)}")
+            yield event.plain_result(f"从云端覆盖失败: {str(e)}")
 
     async def terminate(self):
         """清理资源"""
@@ -1207,6 +1387,8 @@ class MemeSender(Star):
         Returns:
             合并后的消息组件列表，图片会合理地分布在文本中
         """
+        logger.debug(f"[meme_manager] _merge_components_with_images 输入: 组件总数={len(components)}, 图片总数={len(images)}")
+        
         if not images:
             return components
 
@@ -1216,6 +1398,7 @@ class MemeSender(Star):
 
         # 找到所有 Plain 组件的索引
         plain_indices = [i for i, comp in enumerate(components) if isinstance(comp, Plain)]
+        logger.debug(f"[meme_manager] Plain 组件的索引位置列表: {plain_indices}")
 
         if not plain_indices:
             # 没有 Plain 组件，直接添加图片到末尾
@@ -1224,7 +1407,9 @@ class MemeSender(Star):
         # 策略：将图片均匀分布在文本组件中，优先在文本后添加图片
         # 这样在分段回复时，图片更容易和对应的文本一起发送
         merged_components = components.copy()
-        images_per_text = max(1, len(images) // len(plain_indices))  # 每个文本至少配一张图片
+        images_per_text = max(
+            1, len(images) // len(plain_indices)
+        )  # 每个文本至少配一张图片
         image_index = 0
         images_inserted_so_far = 0  # 跟踪已插入的图片数量
 
@@ -1238,6 +1423,8 @@ class MemeSender(Star):
                 images_for_this_text = len(images) - image_index
             else:
                 images_for_this_text = min(images_per_text, len(images) - image_index)
+            
+            logger.debug(f"[meme_manager] Plain 组件 {idx} (索引={plain_idx}) 分配的图片数量: {images_for_this_text}")
 
             # 在这个文本组件后插入图片
             # 注意：plain_idx 是在原始 components 中的位置，但由于我们已经插入了一些图片，
@@ -1250,5 +1437,7 @@ class MemeSender(Star):
                     image_index += 1
                     insert_pos += 1
                     images_inserted_so_far += 1
+        
+        logger.debug(f"[meme_manager] 合并前组件总数: {len(components)}, 合并后组件总数: {len(merged_components)}")
 
         return merged_components

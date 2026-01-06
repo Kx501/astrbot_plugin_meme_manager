@@ -1,7 +1,14 @@
+import asyncio
+import logging
+import multiprocessing
+import sys
 from pathlib import Path
-from typing import Dict, List, Union
+
 from .core.sync_manager import SyncManager
 from .core.upload_tracker import UploadTracker
+from .providers import CloudflareR2Provider, StarDotsProvider
+
+logger = logging.getLogger(__name__)
 from .providers import StarDotsProvider, CloudflareR2Provider
 import multiprocessing
 import sys
@@ -35,7 +42,12 @@ class ImageSync:
         sync.sync_all()
     """
 
-    def __init__(self, config: Dict[str, str], local_dir: Union[str, Path], provider_type: str = "stardots"):
+    def __init__(
+        self,
+        config: dict[str, str],
+        local_dir: str | Path,
+        provider_type: str = "stardots",
+    ):
         """
         初始化同步客户端
 
@@ -47,7 +59,7 @@ class ImageSync:
         self.config = config
         self.local_dir = Path(local_dir)
         self.provider_type = provider_type
-        
+
         # 根据 provider_type 初始化对应的 provider
         if provider_type == "stardots":
             self.provider = StarDotsProvider(
@@ -62,19 +74,21 @@ class ImageSync:
             self.provider = CloudflareR2Provider(config)
         else:
             raise ValueError(f"不支持的图床提供者类型: {provider_type}")
-        
+
         # 初始化上传追踪器（仅用于记录已上传文件）
         tracker_file = Path(local_dir) / ".upload_tracker.json"
         self.upload_tracker = UploadTracker(tracker_file)
-        
+
         self.sync_manager = SyncManager(
-            image_host=self.provider, local_dir=self.local_dir, upload_tracker=self.upload_tracker
+            image_host=self.provider,
+            local_dir=self.local_dir,
+            upload_tracker=self.upload_tracker,
         )
-        
+
         self.sync_process = None
         self._sync_task = None
 
-    def check_status(self) -> Dict[str, List[Dict[str, str]]]:
+    def check_status(self) -> dict[str, list[dict[str, str]]]:
         """
         检查同步状态
 
@@ -110,6 +124,12 @@ class ImageSync:
         elif task == "download" and not status.get("to_download"):
             logger.info("没有文件需要下载")
             return True
+        elif task == "overwrite_to_remote" and not (status.get("to_upload") or status.get("to_delete_remote")):
+            logger.info("云端已是最新且完全一致，无需覆盖")
+            return True
+        elif task == "overwrite_from_remote" and not (status.get("to_download") or status.get("to_delete_local")):
+            logger.info("本地已是最新且完全一致，无需覆盖")
+            return True
 
         # 创建并启动进程
         self.sync_process = multiprocessing.Process(
@@ -126,7 +146,7 @@ class ImageSync:
             await self._sync_task
             exit_code = self.sync_process.exitcode
             if exit_code == 0:
-                logger.info(f"同步任务完成成功")
+                logger.info("同步任务完成成功")
                 return True
             else:
                 logger.error(f"同步任务失败，进程退出码: {exit_code}")
@@ -183,7 +203,7 @@ class ImageSync:
         download_success = self.download_to_local()
         return upload_success and download_success
 
-    def get_remote_files(self) -> List[Dict[str, str]]:
+    def get_remote_files(self) -> list[dict[str, str]]:
         """
         获取远程文件列表
 
@@ -225,13 +245,13 @@ class ImageSync:
         return process
 
 
-def run_sync_process(config: Dict[str, str], local_dir: str, task: str):
+def run_sync_process(config: dict[str, str], local_dir: str, task: str):
     """
     在独立进程中运行同步任务
     """
     try:
         logger.info(f"启动同步进程，任务类型: {task}, 本地目录: {local_dir}")
-        
+
         # 检测配置类型并提取正确的配置
         if "cloudflare_r2" in config:
             # 如果是完整配置，提取 cloudflare_r2 部分
@@ -252,7 +272,7 @@ def run_sync_process(config: Dict[str, str], local_dir: str, task: str):
         else:
             logger.error(f"无法识别的配置格式: {list(config.keys())}")
             sys.exit(1)
-        
+
         sync = ImageSync(provider_config, local_dir, provider_type)
 
         if task == "upload":
@@ -269,8 +289,20 @@ def run_sync_process(config: Dict[str, str], local_dir: str, task: str):
             logger.info("开始完整同步任务")
             upload_success = sync.sync_manager.sync_to_remote()
             download_success = sync.sync_manager.sync_from_remote()
-            logger.info(f"完整同步完成，上传成功: {upload_success}, 下载成功: {download_success}")
+            logger.info(
+                f"完整同步完成，上传成功: {upload_success}, 下载成功: {download_success}"
+            )
             sys.exit(0 if upload_success and download_success else 1)
+        elif task == "overwrite_to_remote":
+            logger.info("开始覆盖到云端任务")
+            success = sync.sync_manager.overwrite_to_remote()
+            logger.info(f"覆盖到云端完成，成功: {success}")
+            sys.exit(0 if success else 1)
+        elif task == "overwrite_from_remote":
+            logger.info("开始从云端覆盖任务")
+            success = sync.sync_manager.overwrite_from_remote()
+            logger.info(f"从云端覆盖完成，成功: {success}")
+            sys.exit(0 if success else 1)
         else:
             logger.error(f"未知的任务类型: {task}")
             sys.exit(1)

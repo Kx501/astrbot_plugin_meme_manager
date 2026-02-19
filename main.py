@@ -131,6 +131,9 @@ class MemeSender(Star):
         )
         self.convert_static_to_gif = self.config.get("convert_static_to_gif", False)
 
+        # 流式传输兼容
+        self.streaming_compatibility = self.config.get("streaming_compatibility", False)
+
         # 内容清理规则
         self.content_cleanup_rule = self.config.get(
             "content_cleanup_rule", "&&[a-zA-Z]*&&"
@@ -812,16 +815,72 @@ class MemeSender(Star):
             logger.error(f"[meme_manager] 转换图片为 GIF 失败: {e}")
             return image_path
 
+    async def _send_memes_streaming(self, event: AstrMessageEvent):
+        """流式传输兼容模式：在流式消息发送完成后，主动发送表情图片作为独立消息。"""
+        if not self.found_emotions:
+            return
+
+        try:
+            random_value = random.randint(1, 100)
+            if random_value > self.emotions_probability:
+                return
+
+            for emotion in self.found_emotions:
+                if not emotion:
+                    continue
+
+                emotion_path = os.path.join(MEMES_DIR, emotion)
+                if not os.path.exists(emotion_path):
+                    continue
+
+                memes = [
+                    f
+                    for f in os.listdir(emotion_path)
+                    if f.endswith((".jpg", ".png", ".gif"))
+                ]
+                if not memes:
+                    continue
+
+                meme = random.choice(memes)
+                meme_file = os.path.join(emotion_path, meme)
+                final_meme_file = self._convert_to_gif(meme_file)
+
+                try:
+                    if event.get_platform_name() == "gewechat":
+                        await event.send(MessageChain([Image.fromFileSystem(final_meme_file)]))
+                    else:
+                        await self.context.send_message(
+                            event.unified_msg_origin,
+                            MessageChain([Image.fromFileSystem(final_meme_file)])
+                        )
+                except Exception as e:
+                    logger.error(f"[meme_manager] 流式模式发送表情失败: {e}")
+                finally:
+                    # 清理临时文件
+                    if final_meme_file != meme_file and os.path.exists(final_meme_file):
+                        try:
+                            os.remove(final_meme_file)
+                        except Exception:
+                            pass
+        except Exception as e:
+            logger.error(f"[meme_manager] 流式模式处理表情失败: {e}")
+            logger.error(traceback.format_exc())
+        finally:
+            self.found_emotions = []
+
     @filter.on_decorating_result(priority=99999)
     async def on_decorating_result(self, event: AstrMessageEvent):
         """在消息发送前清理文本中的表情标签，并添加表情图片"""
         logger.debug("[meme_manager] on_decorating_result 开始处理")
         
         result = event.get_result()
-        if (
-            not result
-            or result.result_content_type == ResultContentType.STREAMING_FINISH
-        ):
+        if not result:
+            return
+
+        # 流式传输兼容处理
+        if result.result_content_type == ResultContentType.STREAMING_FINISH:
+            if self.streaming_compatibility:
+                await self._send_memes_streaming(event)
             return
 
         try:

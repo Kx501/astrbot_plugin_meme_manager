@@ -4,7 +4,10 @@
     "type": "string",
     "hint": "请选择要使用的图床服务",
     "default": "stardots",
-    "options": ["stardots", "cloudflare_r2"]
+    "options": [
+      "stardots",
+      "cloudflare_r2"
+    ]
   },
   "image_host_config": {
     "description": "图床配置",
@@ -206,5 +209,11 @@
       "max": 100,
       "step": 10
     }
+  },
+  "streaming_compatibility": {
+    "description": "流式传输兼容",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后，在流式传输模式下表情图片将作为独立消息发送（流式模式下无法混合图文）"
   }
 }

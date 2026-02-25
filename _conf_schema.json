@@ -96,6 +96,19 @@
       }
     }
   },
+  "emotion_llm_enabled": {
+    "description": "启用情感模型判断表情",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后将调用指定对话模型判断表情标签"
+  },
+  "emotion_llm_provider_id": {
+    "description": "情感模型Provider ID",
+    "type": "string",
+    "default": "",
+    "hint": "留空则使用当前对话的模型",
+    "_special": "select_provider"
+  },
   "convert_static_to_gif": {
     "description": "静态图转GIF发送",
     "type": "bool",
@@ -196,5 +209,11 @@
       "max": 100,
       "step": 10
     }
+  },
+  "streaming_compatibility": {
+    "description": "流式传输兼容",
+    "type": "bool",
+    "default": false,
+    "hint": "开启后，在流式传输模式下表情图片将作为独立消息发送（流式模式下无法混合图文）"
   }
 }

@@ -36,7 +36,7 @@ from .backend.category_manager import CategoryManager
 
 
 @register(
-    "meme_manager_fork", "Kx501", "表情包管理器 - 支持表情包发送及表情包上传", "3.18"
+    "astrbot_plugin_meme_manager", "anka,Kx501", "表情包管理器 - 支持表情包发送及表情包上传", "3.2.0"
 )
 class MemeSender(Star):
     def __init__(self, context: Context, config: dict = None):
@@ -159,7 +159,7 @@ class MemeSender(Star):
 
         # 检查是否需要从 GitHub 自动下载表情包
         if should_download_memes(self.memes_dir):
-            self.logger.info("已启动后台任务...")
+            logger.info("已启动后台任务...")
             # 使用 asyncio.create_task() 创建后台异步任务，不阻塞启动
             asyncio.create_task(self._auto_download_from_github())
 
@@ -469,48 +469,25 @@ class MemeSender(Star):
     async def _auto_download_from_github(self):
         """从 GitHub 自动下载表情包（后台异步任务）"""
         try:
-            self.logger.info("=" * 60)
-            self.logger.info("准备从 GitHub 下载默认表情包")
-            self.logger.info("这可能需要一些时间，插件功能可正常使用")
-            self.logger.info("=" * 60)
+            logger.info("=" * 60)
+            logger.info("准备从 GitHub 下载默认表情包")
+            logger.info("这可能需要一些时间，插件功能可正常使用")
+            logger.info("=" * 60)
             
             success = await download_memes_from_github(self.plugin_data_dir)
             
             if success:
-                self.logger.info("=" * 60)
-                self.logger.info("默认表情包下载完成！")
-                self.logger.info("=" * 60)
+                logger.info("=" * 60)
+                logger.info("默认表情包下载完成！")
+                logger.info("=" * 60)
                 # 重新加载表情配置
                 await self.reload_emotions()
             else:
-                self.logger.warning("自动下载失败，请检查网络连接")
-                self.logger.info("提示：可以稍后重试或手动下载表情包")
+                logger.warning("自动下载失败，请检查网络连接")
+                logger.info("提示：可以稍后重试或手动下载表情包")
         except Exception as e:
-            self.logger.error(f"自动下载表情包时出错: {e}", exc_info=True)
-            self.logger.info("提示：可以稍后重试或手动下载表情包")
-
-    async def _auto_download_from_github(self):
-        """从 GitHub 自动下载表情包（后台异步任务）"""
-        try:
-            self.logger.info("=" * 60)
-            self.logger.info("准备从 GitHub 下载默认表情包")
-            self.logger.info("这可能需要一些时间，插件功能可正常使用")
-            self.logger.info("=" * 60)
-            
-            success = await download_memes_from_github(self.plugin_data_dir)
-            
-            if success:
-                self.logger.info("=" * 60)
-                self.logger.info("默认表情包下载完成！")
-                self.logger.info("=" * 60)
-                # 重新加载表情配置
-                await self.reload_emotions()
-            else:
-                self.logger.warning("自动下载失败，请检查网络连接")
-                self.logger.info("提示：可以稍后重试或手动下载表情包")
-        except Exception as e:
-            self.logger.error(f"自动下载表情包时出错: {e}", exc_info=True)
-            self.logger.info("提示：可以稍后重试或手动下载表情包")
+            logger.error(f"自动下载表情包时出错: {e}", exc_info=True)
+            logger.info("提示：可以稍后重试或手动下载表情包")
 
     def _is_position_in_thinking_tags(self, text: str, position: int) -> bool:
         """检查指定位置是否在thinking标签内

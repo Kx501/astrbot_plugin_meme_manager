@@ -201,8 +201,8 @@
 - `webui_port`: WebUI 服务端口号
 - `max_emotions_per_message`: 每条消息最大表情数量
 - `emotions_probability`: 表情触发概率 (0-100)
-- `enable_mixed_message`: 启用回复带图功能
-- `mixed_message_probability`: 回复带图概率 (0-100)
+- `enable_mixed_message`: 是否允许把文字与表情图**合并为同一条消息**
+- `mixed_message_probability`: 图文**合并一条**与**分条发送**之间的随机比例 (1–100)
 - `strict_max_emotions_per_message`: 是否严格限制表情数量
 - `enable_loose_emotion_matching`: 是否启用宽松的表情匹配
 - `enable_alternative_markup`: 是否启用备用标记

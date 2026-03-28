@@ -122,10 +122,10 @@
     "hint": "每次回复最多使用表情数量"
   },
   "emotions_probability": {
-    "description": "表情出现概率",
+    "description": "识别到标签后的发图概率",
     "type": "int",
     "default": 50,
-    "hint": "每次发送表情出现的概率，范围为1-100",
+    "hint": "解析出合法标签后：在 1–100 中均匀随机一个整数 R，仅当 R ≤ 本配置值时才真的发图",
     "slider": {
       "min": 1,
       "max": 100,
@@ -194,16 +194,16 @@
     "hint": "移除分段后内容中的指定内容。如填写 `[。？！]` 将移除所有的句号、问号、感叹号。"
   },
   "enable_mixed_message": {
-    "description": "启用回复带图",
+    "description": "允许图文合并",
     "type": "bool",
     "default": true,
     "hint": "文本和表情图片在同一条消息中发送（注意：分段回复可能导致功能失效）"
   },
   "mixed_message_probability": {
-    "description": "回复带图概率",
+    "description": "图文同条概率",
     "type": "int",
     "default": 50,
-    "hint": "启用回复带图时的发送概率，范围为1-100",
+    "hint": "仅当「允许图文合并」开启且本轮已通过发图判断时生效，范围为1-100",
     "slider": {
       "min": 1,
       "max": 100,

@@ -19,6 +19,7 @@ from astrbot.api.all import *
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.event.filter import EventMessageType
 from astrbot.api.message_components import *
+from astrbot.api.message_components import Image
 from astrbot.api.provider import LLMResponse
 from astrbot.api.star import Context, Star, register
 from astrbot.core.message.components import Plain
@@ -897,7 +898,7 @@ class MemeSender(Star):
                 if not emotion:
                     continue
 
-                emotion_path = os.path.join(MEMES_DIR, emotion)
+                emotion_path = os.path.join(self.memes_dir, emotion)
                 if not os.path.exists(emotion_path):
                     continue
 
@@ -1002,7 +1003,12 @@ class MemeSender(Star):
                 # 检查概率（注意：概率判断是"小于等于"才发送）
                 random_value = random.randint(1, 100)
                 threshold = self.emotions_probability
-                
+
+                if random_value > threshold:
+                    logger.debug(
+                        f"[meme_manager] 跳过发送表情：概率未命中 ({random_value} > {threshold})，"
+                    )
+
                 if random_value <= threshold:
                     # 创建表情图片列表
                     emotion_images = []
@@ -1015,6 +1021,9 @@ class MemeSender(Star):
                         path_exists = os.path.exists(emotion_path)
                         
                         if not path_exists:
+                            logger.warning(
+                                f"[meme_manager] 表情目录不存在，跳过标签「{emotion}」: {emotion_path}"
+                            )
                             continue
 
                         memes = [
@@ -1022,8 +1031,11 @@ class MemeSender(Star):
                             for f in os.listdir(emotion_path)
                             if f.endswith((".jpg", ".png", ".gif"))
                         ]
-                        
+
                         if not memes:
+                            logger.warning(
+                                f"[meme_manager] 目录内无 .jpg/.png/.gif，跳过标签「{emotion}」: {emotion_path}"
+                            )
                             continue
 
                         meme = random.choice(memes)
@@ -1058,8 +1070,11 @@ class MemeSender(Star):
                             event.set_extra(
                                 "meme_manager_pending_images", emotion_images
                             )
-                    else:
-                        pass
+                    elif self.found_emotions:
+                        logger.warning(
+                            "[meme_manager] 已识别表情标签，但未找到任何可发送的图片文件；"
+                            "请确认插件数据目录 memes/<标签名>/ 下存在图片"
+                        )
 
                 # 清空已处理的表情列表
                 self.found_emotions = []

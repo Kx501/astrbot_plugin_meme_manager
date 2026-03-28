@@ -1,4 +1,5 @@
-name: meme_manager_fork
+name: astrbot_plugin_meme_manager
+display_name: 表情包管理器
 desc: 修改自anka/astrbot_plugin_meme_manager, 更多信息与功能预览请前往仓库页面查看:https://github.com/kx501/astrbot_plugin_meme_manager
 version: v3.2.0
 author: anka, Kx501
